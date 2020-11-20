@@ -125,6 +125,7 @@ ln -sf gsi.x gsi.x_${repoName}_${datestamp}_${commitID}
 ln -sf enkf_wrf.x enkf_wrf.x_${repoName}_${datestamp}_${commitID}
 ln -sf enspreproc.x enspreproc.x_${repoName}_${datestamp}_${commitID}
 ###mv $dir_root/build $dir_root/build_$commitID
+cp gsi.x ../../../exec/gsi.exe
 
 echo -e "\n\nAll build results are at ./build/ \n\n"
 
