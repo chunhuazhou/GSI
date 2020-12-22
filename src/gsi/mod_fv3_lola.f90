@@ -798,6 +798,7 @@ subroutine fv3_ll_to_h(a,b,nxa,nya,nxb,nyb,rev_flg)
         end do
      end do
   else
+!!!!!!!!!! output order as input W-E S-N and (i:lat,j:lon) !!!!!!!!!!!
      do i=1,nyb
         ijr=(i-1)*nxb
         do j=1,nxb
@@ -805,14 +806,6 @@ subroutine fv3_ll_to_h(a,b,nxa,nya,nxb,nyb,rev_flg)
              +a3dy (i,j)*(a3dx1(i,j)*a(a3jyp(i,j),a3ix(i,j))+a3dx(i,j)*a(a3jyp(i,j),a3ixp(i,j)))
         end do
      end do
-!!!!!!!!!! output order as input W-E S-N and (i:lat,j:lon) !!!!!!!!!!!
-!     do j=1,nxb
-!        ijr=(j-1)*nyb
-!        do i=1,nyb
-!           b(i+ijr)=a3dy1(i,j)*(a3dx1(i,j)*a(a3jy (i,j),a3ix(i,j))+a3dx(i,j)*a(a3jy (i,j),a3ixp(i,j))) &
-!             +a3dy (i,j)*(a3dx1(i,j)*a(a3jyp(i,j),a3ix(i,j))+a3dx(i,j)*a(a3jyp(i,j),a3ixp(i,j)))
-!        end do
-!     end do
   endif
 end subroutine fv3_ll_to_h
 
