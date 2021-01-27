@@ -284,10 +284,10 @@ subroutine gsi_rfv3io_get_grid_specs(fv3filenamegin,ierr)
 ! check the grid type
     if( grid_type_fv3_regional == 1 ) then
        if(mype==0) write(6,*) 'FV3 regional input grid is  E-W N-S grid'
-       grid_reverse_flag=.true.    ! compare to usual map grid
+       grid_reverse_flag=.true.    ! grid is revered comparing to usual map view
     elseif(grid_type_fv3_regional == 2) then
        if(mype==0) write(6,*) 'FV3 regional input grid is  W-E S-N grid'
-       grid_reverse_flag=.false.   ! just like we see on map
+       grid_reverse_flag=.false.   ! grid orientated just like we see on map view    
     else
        write(6,*) 'Error: FV3 regional input grid is unknown grid'
        call stop2(678)
@@ -1357,6 +1357,23 @@ subroutine gsi_fv3ncdf_readuv(dynvarsfile,ges_u,ges_v)
              if(allocated(uu)) deallocate(uu)
              allocate(uu(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
              iret=nf90_get_var(gfile_loc,k,uu)
+!    NOTE on transfor to earth u/v:
+!       The u and v before transferring need to be in E-W/N-S grid, which is
+!       defined as reversed grid here because it is revered from map view.
+!
+!       Have set the following flag for grid orientation
+!         grid_reverse_flag=true:  E-W/N-S grid
+!         grid_reverse_flag=false: W-E/S-N grid 
+!
+!       So for preparing the wind transferring, need to reverse the grid from
+!       W-E/S-N grid to E-W/N-S grid when grid_reverse_flag=false:
+!
+!            if(.not.grid_reverse_flag) call reverse_grid_r_uv
+!
+!       and the last input parameter for fv3_h_to_ll is alway true:
+!
+!            call fv3_h_to_ll(u,a,nx,ny,nxa,nya,.true.)     
+!
              if(trim(name)=='u'.or.trim(name)=='U') then
                 allocate(temp1(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
                 if(.not.grid_reverse_flag) call reverse_grid_r_uv(uu,dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3)))
@@ -2434,13 +2451,13 @@ subroutine reverse_grid_r(grid,nx,ny,nz)
 !
 !  reverse the first two dimension of the array grid
 !
-    use kinds, only: r_kind
+    use kinds, only: r_kind,i_kind
 
     implicit none
-    integer,      intent(in     ) :: nx,ny,nz
-    real(r_kind), intent(inout  ) :: grid(nx,ny,nz)
-    real(r_kind) :: tmp_grid(nx,ny)
-    integer :: i,j,k
+    integer(i_kind),  intent(in     ) :: nx,ny,nz
+    real(r_kind),     intent(inout  ) :: grid(nx,ny,nz)
+    real(r_kind)                      :: tmp_grid(nx,ny)
+    integer(i_kind)                   :: i,j,k
 !
     do k=1,nz
        tmp_grid(:,:)=grid(:,:,k)
@@ -2457,13 +2474,13 @@ subroutine reverse_grid_r_uv(grid,nx,ny,nz)
 !
 !  reverse the first two dimension of the array grid
 !
-    use kinds, only: r_kind
+    use kinds, only: r_kind,i_kind
 
     implicit none
-    integer,      intent(in     ) :: nx,ny,nz
-    real(r_kind), intent(inout  ) :: grid(nx,ny,nz)
-    real(r_kind) :: tmp_grid(nx,ny)
-    integer :: i,j,k
+    integer(i_kind), intent(in     ) :: nx,ny,nz
+    real(r_kind),    intent(inout  ) :: grid(nx,ny,nz)
+    real(r_kind)                     :: tmp_grid(nx,ny)
+    integer(i_kind)                  :: i,j,k
 !
     do k=1,nz
        tmp_grid(:,:)=grid(:,:,k)
