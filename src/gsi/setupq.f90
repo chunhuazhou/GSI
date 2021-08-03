@@ -149,9 +149,8 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   use nc_diag_read_mod, only: nc_diag_read_init, nc_diag_read_get_dim, nc_diag_read_close
   use gsi_4dvar, only: nobs_bins,hr_obsbin,min_offset
   use oneobmod, only: oneobtest,maginnov,magoberr
-  use guess_grids, only: ges_lnprsl,hrdifsig,nfldsig,ges_tsen,ges_prsl, &
-                         pbl_height, geop_hgtl
-! use guess_grids, only: ges_lnprsl,hrdifsig,nfldsig,ges_tsen,ges_prsl,pbl_height
+  use guess_grids, only: ges_lnprsl,hrdifsig,nfldsig,ges_tsen,ges_prsl,pbl_height
+  use guess_grids, only: geop_hgtl, ges_prsi
   use gridmod, only: lat2,lon2,nsig,get_ijk,twodvar_regional
   use constants, only: zero,one,r1000,r10,r100
   use constants, only: huge_single,wgtlim,three
@@ -171,7 +170,6 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   use gsi_metguess_mod, only : gsi_metguess_get,gsi_metguess_bundle
   use sparsearr, only: sparr2, new, size, writearray, fullarray
   use state_vectors, only: svars3d, levels
-  use hdraobmod, only: nhdq,hdqlist
 
   ! The following variables are the coefficients that describe the
   ! linear regression fits that are used to define the dynamic
@@ -214,12 +212,12 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
 ! Declare local variables  
   
   real(r_double) rstation_id
-! real(r_kind) qob,qges,qsges,q2mges,q2mges_water
-  real(r_kind) qob,qges,qsges,q2mges,q2mges_read,q2mges_water
+  real(r_kind) qob,qges,qsges,q2mges,q2mges_water
   real(r_kind) ratio_errors,dlat,dlon,dtime,dpres,rmaxerr,error
   real(r_kind) rsig,dprpx,rlow,rhgh,presq,tfact,ramp
-  real(r_kind) psges,qs2mges,sfcchk,ddiff,errorx
-! real(r_kind) psges,sfcchk,ddiff,errorx
+  real(r_kind) psges,sfcchk,ddiff,errorx
+  real(r_kind) zsges, factw, sfcr, landfrac
+  real(r_kind) sfctges
   real(r_kind) cg_t,cvar,wgt,rat_err2,qcgross
   real(r_kind) grsmlt,ratio,val2,obserror
   real(r_kind) obserrlm,residual,ressw2,scale,ress,huge_error,var_jb
@@ -230,23 +228,23 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   real(r_kind),dimension(nobs):: dup
   real(r_kind),dimension(lat2,lon2,nsig,nfldsig):: qg
   real(r_kind),dimension(lat2,lon2,nfldsig):: qg2m
-! real(r_kind),dimension(nsig):: prsltmp
-  real(r_kind),dimension(nsig):: prsltmp,tsentmp,hsges,qtmp,qstmp,prsltmp2,utmp,vtmp
+  real(r_kind),dimension(nsig):: prsltmp, tvgestmp, tsentmp
+  real(r_kind),dimension(nsig):: prsltmp2, qtmp,zges, utmp, vtmp
+  real(r_kind),dimension(nsig+1):: prsitmp
   real(r_kind),dimension(34):: ptablq
-  real(r_kind) :: zges
   real(r_single),allocatable,dimension(:,:)::rdiagbuf
   real(r_single),allocatable,dimension(:,:)::rdiagbufp
 
 
-  integer(i_kind) i,j,nchar,nreal,ii,l,jj,mm1,itemp,iip
-  integer(i_kind) jsig,itype,k,nn,ikxx,iptrb,ibin,ioff,ioff0,icat,ijb
+  integer(i_kind) i,nchar,nreal,ii,l,jj,mm1,itemp,iip
+  integer(i_kind) jsig,itype,k,nn,ikxx,iptrb,ibin,ioff,ioff0,icat,ijb,isli
   integer(i_kind) ier,ilon,ilat,ipres,iqob,id,itime,ikx,iqmax,iqc
   integer(i_kind) ier2,iuse,ilate,ilone,istnelv,iobshgt,izz,iprvd,isprvd
   integer(i_kind) idomsfc,iderivative
-  integer(i_kind) ibb,ikk,idddd
+  integer(i_kind) ibb,ikk
   real(r_kind) :: delz
   type(sparr2) :: dhx_dx
-  integer(i_kind) :: iz, q_ind, nind, nnz,iprev_station
+  integer(i_kind) :: iz, q_ind, nind, nnz
 
   character(8) station_id
   character(8),allocatable,dimension(:):: cdiagbuf,cdiagbufp
@@ -270,6 +268,8 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   real(r_kind) :: thispbl_height,ratio_PBL_height,prestsfc,diffsfc
   real(r_kind) :: hr_offset
 
+  integer(i_kind) :: idft
+
   equivalence(rstation_id,station_id)
   equivalence(r_prvstg,c_prvstg)
   equivalence(r_sprvstg,c_sprvstg)
@@ -278,8 +278,8 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   real(r_kind),allocatable,dimension(:,:,:,:) :: ges_q
   real(r_kind),allocatable,dimension(:,:,:  ) :: ges_q2m
   real(r_kind),allocatable,dimension(:,:,:  ) :: ges_z
-  real(r_kind),allocatable,dimension(:,:,:,:) :: ges_u
-  real(r_kind),allocatable,dimension(:,:,:,:) :: ges_v
+  real(r_kind),allocatable,dimension(:,:,:,:) :: ges_tv
+  real(r_kind),allocatable,dimension(:,:,:,:) :: ges_u, ges_v
 
   logical:: l_pbl_pseudo_itype
   integer(i_kind):: ich0
@@ -322,37 +322,12 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   isprvd=21   ! index of observation subprovider
   icat =22    ! index of data level category
   ijb  =23    ! index of non linear qc parameter
-  iptrb=24    ! index of q perturbation
+  idft=24     ! index of sonde profile launch time
+  iptrb=25    ! index of q perturbation
 
   do i=1,nobs
      muse(i)=nint(data(iuse,i)) <= jiter
   end do
-!  If HD raobs available move prepbufr version to monitor
-  if(nhdq > 0)then
-     iprev_station=0
-     do i=1,nobs
-        ikx=nint(data(ikxx,i))
-        itype=ictype(ikx)
-        if(itype == 120) then
-           rstation_id     = data(id,i)
-           read(station_id,'(i5,3x)',err=1200) idddd
-           if(idddd == iprev_station)then
-             data(iuse,i)=108._r_kind
-             muse(i) = .false.
-           else
-              stn_loop:do j=1,nhdq
-                if(idddd == hdqlist(j))then
-                   iprev_station=idddd
-                   data(iuse,i)=108._r_kind
-                   muse(i) = .false.
-                   exit stn_loop
-                end if
-              end do stn_loop
-           end if
-        end if
-1200    continue
-     end do
-  end if
 
   var_jb=zero
 
@@ -433,12 +408,13 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
 ! Prepare specific humidity data
   call dtime_setup()
   do i=1,nobs
-     ikx=nint(data(ikxx,i))
-     itype=ictype(ikx)
+     isli = -1
      dtime=data(itime,i)
      call dtime_check(dtime, in_curbin, in_anybin)
      if(.not.in_anybin) cycle
 
+     ikx=nint(data(ikxx,i))
+     itype=ictype(ikx)
 
      ! Flag static conditions to create PBL_pseudo_surfobsq obs.
      l_pbl_pseudo_itype = l_pbl_pseudo_surfobsq .and.         &
@@ -451,6 +427,7 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
         dpres=data(ipres,i)
 
         rmaxerr=data(iqmax,i)
+         rstation_id     = data(id,i)
         error=data(ier2,i)
         prest=r10*exp(dpres)     ! in mb
         var_jb=data(ijb,i)
@@ -503,25 +480,43 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
           mype,nfldsig)
      call tintrp2a1(ges_lnprsl,prsltmp,dlat,dlon,dtime,hrdifsig,&
           nsig,mype,nfldsig)
-     call tintrp2a1(ges_prsl,prsltmp2,dlat,dlon,dtime,hrdifsig,&
-          nsig,mype,nfldsig)
 
-     call tintrp2a11(qg2m,qs2mges,dlat,dlon,dtime,hrdifsig,mype,nfldsig)
-     call tintrp2a1(ges_q,qtmp,dlat,dlon,dtime,hrdifsig,&
-          nsig,mype,nfldsig)
-     call tintrp2a1(qg,qstmp,dlat,dlon,dtime,hrdifsig,&
-          nsig,mype,nfldsig)
-     call tintrp2a1(ges_tsen,tsentmp,dlat,dlon,dtime,hrdifsig,&
-          nsig,mype,nfldsig)
-     call tintrp2a1(ges_u,utmp,dlat,dlon,dtime,hrdifsig,&
-          nsig,mype,nfldsig)
-     call tintrp2a1(ges_v,vtmp,dlat,dlon,dtime,hrdifsig,&
-          nsig,mype,nfldsig)
-     call tintrp2a1(geop_hgtl,hsges,dlat,dlon,dtime,hrdifsig,&
-          nsig,mype,nfldsig)
-     call tintrp2a11(ges_z,zges,dlat,dlon,dtime,hrdifsig,&
-          mype,nfldsig)
+!   interpolate geovals to obs locations
+    ! surface geopotential height 
+    call tintrp2a11(ges_z,zsges,dlat,dlon,dtime,hrdifsig, mype,nfldsig)
+    ! geopotential height 
+    call tintrp2a1(geop_hgtl, zges, dlat, dlon, dtime, hrdifsig, nsig, mype, nfldsig)
+    prsltmp2 = exp(prsltmp) ! pressure on model layers
+    ! pressure on interfaces
+    call tintrp2a1(ges_prsi,prsitmp,dlat,dlon,dtime,hrdifsig,nsig+1,mype,nfldsig)
+    ! virtual temperature profile
+    call tintrp2a1(ges_tv,tvgestmp,dlat,dlon,dtime,hrdifsig,nsig,mype,nfldsig)
+    ! sensible temperature profile
+    call tintrp2a1(ges_tsen,tsentmp,dlat,dlon,dtime,hrdifsig,nsig,mype,nfldsig)
+    ! specific humidity
+    call tintrp2a1(ges_q,qtmp,dlat,dlon,dtime,hrdifsig,nsig,mype,nfldsig)
+    ! winds
+    call tintrp2a1(ges_u,utmp,dlat,dlon,dtime,hrdifsig,nsig,mype,nfldsig)
+    call tintrp2a1(ges_v,vtmp,dlat,dlon,dtime,hrdifsig,nsig,mype,nfldsig)
+    ! surface temperature
+    call tintrp31(ges_tv,sfctges,dlat,dlon,log(psges),dtime, &
+         hrdifsig,mype,nfldsig)
 
+    isli = data(idomsfc,i) ! dominate surface type
+
+     ! pre-set a surface roughness no lower than 0.1 cm
+     ! pre-set wind_reduction_factor to 1.0
+     ! pre-set land_area_fraction to 0.0 for certain ocean/sea data, otherwise 1.0
+     !  this will not be correct for satwind or aircraft data, but mostly correct otherwise
+     sfcr = 0.1
+     factw=one
+     if (itype.eq.180 .or. itype.eq.182 .or. itype.eq.183 .or. itype.eq.184 .or.       &
+             itype.eq.189 .or. itype.eq.190 .or. itype.eq.191 .or. itype.eq.194 .or.   &
+             itype.eq.199 .or. isli.eq.0) then
+        landfrac = 0.0
+     else
+        landfrac = 1.0
+     endif
 
      presq=r10*exp(dpres)
      itype=ictype(ikx)
@@ -612,9 +607,6 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
      if (dpres > rsig) ratio_errors=zero
      error=one/(error*qsges)
 
-! Interpolate guess moisture to observation location and time
-     call tintrp31(ges_q,qges,dlat,dlon,dpres,dtime, &
-        hrdifsig,mype,nfldsig)
      iz = max(1, min( int(dpres), nsig))
      delz = max(zero, min(dpres - float(iz), one))
 
@@ -1016,23 +1008,6 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
 
 ! If require guess vars available, extract from bundle ...
   if(size(gsi_metguess_bundle)==nfldsig) then
-     varname='z'
-     call gsi_bundlegetpointer(gsi_metguess_bundle(1),trim(varname),rank2,istatus)
-     if (istatus==0) then
-         if(allocated(ges_z))then
-            write(6,*) trim(myname), ': ', trim(varname), ' already incorrectly alloc '
-            call stop2(999)
-         endif
-         allocate(ges_z(size(rank2,1),size(rank2,2),nfldsig))
-         ges_z(:,:,1)=rank2
-         do ifld=2,nfldsig
-            call gsi_bundlegetpointer(gsi_metguess_bundle(ifld),trim(varname),rank2,istatus)
-            ges_z(:,:,ifld)=rank2
-         enddo
-     else
-         write(6,*) trim(myname),': ', trim(varname), ' not found in met bundle, ier= ',istatus
-         call stop2(999)
-     endif
 !    get ps ...
      varname='ps'
      call gsi_bundlegetpointer(gsi_metguess_bundle(1),trim(varname),rank2,istatus)
@@ -1071,6 +1046,60 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
             call stop2(999)
         endif
      endif ! i_use_2mq4b
+!    get q ...
+     varname='q'
+     call gsi_bundlegetpointer(gsi_metguess_bundle(1),trim(varname),rank3,istatus)
+     if (istatus==0) then
+         if(allocated(ges_q))then
+            write(6,*) trim(myname), ': ', trim(varname), ' already incorrectly alloc '
+            call stop2(999)
+         endif
+         allocate(ges_q(size(rank3,1),size(rank3,2),size(rank3,3),nfldsig))
+         ges_q(:,:,:,1)=rank3
+         do ifld=2,nfldsig
+            call gsi_bundlegetpointer(gsi_metguess_bundle(ifld),trim(varname),rank3,istatus)
+            ges_q(:,:,:,ifld)=rank3
+         enddo
+     else
+         write(6,*) trim(myname),': ', trim(varname), ' not found in met bundle, ier= ',istatus
+         call stop2(999)
+     endif
+!    get z ...
+     varname='z'
+     call gsi_bundlegetpointer(gsi_metguess_bundle(1),trim(varname),rank2,istatus)
+     if (istatus==0) then
+         if(allocated(ges_z))then
+            write(6,*) trim(myname), ': ', trim(varname), ' already incorrectly alloc '
+            call stop2(999)
+         endif
+         allocate(ges_z(size(rank2,1),size(rank2,2),nfldsig))
+         ges_z(:,:,1)=rank2
+         do ifld=2,nfldsig
+            call gsi_bundlegetpointer(gsi_metguess_bundle(ifld),trim(varname),rank2,istatus)
+            ges_z(:,:,ifld)=rank2
+         enddo
+     else
+         write(6,*) trim(myname),': ', trim(varname), ' not found in met bundle, ier= ',istatus
+         call stop2(999)
+     endif
+!    get tv ...
+     varname='tv'
+     call gsi_bundlegetpointer(gsi_metguess_bundle(1),trim(varname),rank3,istatus)
+     if (istatus==0) then
+         if(allocated(ges_tv))then
+            write(6,*) trim(myname), ': ', trim(varname), ' already incorrectly alloc '
+            call stop2(999)
+         endif
+         allocate(ges_tv(size(rank3,1),size(rank3,2),size(rank3,3),nfldsig))
+         ges_tv(:,:,:,1)=rank3
+         do ifld=2,nfldsig
+            call gsi_bundlegetpointer(gsi_metguess_bundle(ifld),trim(varname),rank3,istatus)
+            ges_tv(:,:,:,ifld)=rank3
+         enddo
+     else
+         write(6,*) trim(myname),': ', trim(varname), ' not found in met bundle, ier= ',istatus
+         call stop2(999)
+     endif
 !    get u ...
      varname='u'
      call gsi_bundlegetpointer(gsi_metguess_bundle(1),trim(varname),rank3,istatus)
@@ -1102,24 +1131,6 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
          do ifld=2,nfldsig
             call gsi_bundlegetpointer(gsi_metguess_bundle(ifld),trim(varname),rank3,istatus)
             ges_v(:,:,:,ifld)=rank3
-         enddo
-     else
-         write(6,*) trim(myname),': ', trim(varname), ' not found in met bundle, ier= ',istatus
-         call stop2(999)
-     endif
-!    get q ...
-     varname='q'
-     call gsi_bundlegetpointer(gsi_metguess_bundle(1),trim(varname),rank3,istatus)
-     if (istatus==0) then
-         if(allocated(ges_q))then
-            write(6,*) trim(myname), ': ', trim(varname), ' already incorrectly alloc '
-            call stop2(999)
-         endif
-         allocate(ges_q(size(rank3,1),size(rank3,2),size(rank3,3),nfldsig))
-         ges_q(:,:,:,1)=rank3
-         do ifld=2,nfldsig
-            call gsi_bundlegetpointer(gsi_metguess_bundle(ifld),trim(varname),rank3,istatus)
-            ges_q(:,:,:,ifld)=rank3
          enddo
      else
          write(6,*) trim(myname),': ', trim(varname), ' not found in met bundle, ier= ',istatus
@@ -1157,7 +1168,7 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
         endif
      end if
 
-     call nc_diag_init(diag_conv_file, append=append_diag)
+     call nc_diag_init(diag_conv_file)
 
      if (.not. append_diag) then ! don't write headers on append - the module will break?
         call nc_diag_header("date_time",ianldate )
@@ -1169,7 +1180,6 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   end subroutine init_netcdf_diag_
   subroutine contents_binary_diag_(odiag)
     type(obs_diag),pointer,intent(in):: odiag
-
         cdiagbuf(ii)    = station_id         ! station id
 
         rdiagbuf(1,ii)  = ictype(ikx)        ! observation type
@@ -1300,9 +1310,10 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
            call nc_diag_metadata("Latitude",                sngl(data(ilate,i))    )
            call nc_diag_metadata("Longitude",               sngl(data(ilone,i))    )
            call nc_diag_metadata("Station_Elevation",       sngl(data(istnelv,i))  )
-           call nc_diag_metadata("Pressure",                sngl(presq*r100)       )
+           call nc_diag_metadata("Pressure",                sngl(presq)            )
            call nc_diag_metadata("Height",                  sngl(data(iobshgt,i))  )
            call nc_diag_metadata("Time",                    sngl(dtime-time_offset))
+           call nc_diag_metadata("LaunchTime",              sngl(data(idft,i))     )
            call nc_diag_metadata("Prep_QC_Mark",            sngl(data(iqc,i))      )
            call nc_diag_metadata("Prep_Use_Flag",           sngl(data(iuse,i))     )
            call nc_diag_metadata("Nonlinear_QC_Var_Jb",     sngl(var_jb)           )
@@ -1319,8 +1330,6 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
            call nc_diag_metadata("Observation",                   sngl(data(iqob,i)))
            call nc_diag_metadata("Obs_Minus_Forecast_adjusted",   sngl(ddiff)       )
            call nc_diag_metadata("Obs_Minus_Forecast_unadjusted", sngl(qob-qges)    )
-           call nc_diag_metadata("Forecast_adjusted",             sngl(data(iqob,i)-ddiff))
-           call nc_diag_metadata("Forecast_unadjusted",           sngl(qges))
            call nc_diag_metadata("Forecast_Saturation_Spec_Hum",  sngl(qsges)       )
            if (lobsdiagsave) then
               do jj=1,miter
@@ -1350,18 +1359,22 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
              call nc_diag_data2d("Observation_Operator_Jacobian_endind", dhx_dx%end_ind)
              call nc_diag_data2d("Observation_Operator_Jacobian_val", real(dhx_dx%val,r_single))
            endif
-
-           call nc_diag_data2d("specific_humidity", qtmp)
-           call nc_diag_data2d("saturation_specific_humidity", qstmp)
-           call nc_diag_data2d("atmosphere_pressure_coordinate",prsltmp2*r1000)
-           call nc_diag_metadata("surface_pressure",psges*r1000)
-           call nc_diag_metadata("saturation_specific_humidity_2m", qs2mges)
-           call nc_diag_metadata("specific_humidity_2m",q2mges_read)
+           ! geovals for JEDI UFO
+           call nc_diag_metadata("surface_geopotential_height", sngl(zsges))
+           call nc_diag_metadata("surface_pressure", sngl(psges*r1000))
+           call nc_diag_metadata("surface_temperature", sngl(sfctges))
+           call nc_diag_data2d("geopotential_height", sngl(zsges+zges))
+           call nc_diag_data2d("atmosphere_pressure_coordinate", sngl(prsltmp2*r1000))
+           call nc_diag_data2d("atmosphere_pressure_coordinate_interface", sngl(prsitmp*r1000))
+           call nc_diag_data2d("virtual_temperature", sngl(tvgestmp))
            call nc_diag_data2d("air_temperature", sngl(tsentmp))
-           call nc_diag_data2d("northward_wind", sngl(vtmp))
-           call nc_diag_data2d("eastward_wind", sngl(utmp))
-           call nc_diag_data2d("geopotential_height", sngl(hsges))
-           call nc_diag_metadata("surface_height", sngl(zges))
+           call nc_diag_data2d("specific_humidity", sngl(qtmp))
+           call nc_diag_data2d("northward_wind", sngl(utmp))
+           call nc_diag_data2d("eastward_wind", sngl(vtmp))
+           call nc_diag_metadata("surface_roughness", sngl(sfcr/r100))
+           call nc_diag_metadata("landmask", sngl(landfrac))
+           call nc_diag_metadata("Wind_Reduction_Factor_at_10m", sngl(factw))
+
   end subroutine contents_netcdf_diag_
 
   subroutine contents_netcdf_diagp_
@@ -1375,7 +1388,7 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
            call nc_diag_metadata("Latitude",                sngl(data(ilate,i))    )
            call nc_diag_metadata("Longitude",               sngl(data(ilone,i))    )
            call nc_diag_metadata("Station_Elevation",       sngl(data(istnelv,i))  )
-           call nc_diag_metadata("Pressure",                sngl(presq*r100)       )
+           call nc_diag_metadata("Pressure",                sngl(presq)            )
            call nc_diag_metadata("Height",                  sngl(data(iobshgt,i))  )
            call nc_diag_metadata("Time",                    sngl(dtime-time_offset))
            call nc_diag_metadata("Prep_QC_Mark",            sngl(data(iqc,i))      )
@@ -1394,8 +1407,6 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
            call nc_diag_metadata("Observation",                   sngl(data(iqob,i)))
            call nc_diag_metadata("Obs_Minus_Forecast_adjusted",   sngl(ddiff)       )
            call nc_diag_metadata("Obs_Minus_Forecast_unadjusted", sngl(ddiff)       )
-           call nc_diag_metadata("Forecast_adjusted",             sngl(data(iqob,i)-ddiff))
-           call nc_diag_metadata("Forecast_unadjusted",           sngl(data(iqob,i)-ddiff))
            call nc_diag_metadata("Forecast_Saturation_Spec_Hum",  sngl(qsges)       )
 
            if (save_jacobian) then
@@ -1404,14 +1415,16 @@ subroutine setupq(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
              call nc_diag_data2d("Observation_Operator_Jacobian_val", real(dhx_dx%val,r_single))
            endif
 
-           call nc_diag_data2d("atmosphere_pressure_coordinate",exp(prsltmp)*r1000)
-
   end subroutine contents_netcdf_diagp_
 
   subroutine final_vars_
     if(allocated(ges_q2m)) deallocate(ges_q2m)
     if(allocated(ges_q )) deallocate(ges_q )
     if(allocated(ges_ps)) deallocate(ges_ps)
+    if(allocated(ges_z )) deallocate(ges_z )
+    if(allocated(ges_tv)) deallocate(ges_tv)
+    if(allocated(ges_u)) deallocate(ges_u)
+    if(allocated(ges_v)) deallocate(ges_v)
   end subroutine final_vars_
 
 end subroutine setupq
