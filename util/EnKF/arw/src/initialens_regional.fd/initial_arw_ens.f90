@@ -1,4 +1,4 @@
-program initial_arw_ens 
+program initial_arw_ens_multidom
 !$$$  subprogram documentation block
 !                .      .    .                                       .
 ! subprogram:    initial_arw_ens 
@@ -29,9 +29,8 @@ program initial_arw_ens
   implicit none
   INCLUDE 'netcdf.inc'
 
-  integer(i_kind),parameter :: max_varname_length=12
+  integer(i_kind),parameter :: max_varname_length=32
   integer :: n_ens
-  integer(i_kind),allocatable :: beginmem(:),endmem(:)
   integer :: nlon,nlat,nsig,num_fields
   integer(i_kind) :: nc2d,nc3d
   character(len=max_varname_length),allocatable,dimension(:) :: cvars2d 
@@ -67,7 +66,8 @@ program initial_arw_ens
 ! Declare variables.
 !
   logical :: ifinflt_column
-  namelist/setup/ n_ens,ifinflt_column
+  integer :: num_dom
+  namelist/setup/ n_ens,ifinflt_column,num_dom
 !
 !
 !
@@ -79,6 +79,7 @@ program initial_arw_ens
 
   integer(i_kind) :: iunit,iout
   integer :: ios
+  integer :: domainid,mymemid
   character(len=80) :: myname_
   character(len=80) :: filestdout
   logical :: lexist
@@ -91,13 +92,13 @@ program initial_arw_ens
 !
   ifinflt_column=.false.
   n_ens=0
+  num_dom=1
 !
-  allocate(beginmem(npe),endmem(npe))
 !
   iout=13
-  write(filestdout,'(a,I4.4)') 'stdout_pe',mype+1
+  write(filestdout,'(a,I4.4)') 'stdout_initens_pe',mype+1
   open(iout,file=trim(filestdout))
-  open(11,file='namelist.input')
+  open(11,file='namelist.initens')
     read(11,setup,iostat=ios)
     if(ios/=0) call die(myname_,'read(setup)',ios)
   close(11)
@@ -117,10 +118,10 @@ program initial_arw_ens
        i=1
        open(10,file='vertical_inflate_factor.txt')
        read(10,*)
-100    continue 
+       do while(i <= infltlvl)
           read(10,'(I10,f10.4)',end=110) k,infltnfct(i)
           i=i+1
-       goto 100
+       enddo
 110    continue
     close(10)
     endif
@@ -129,85 +130,81 @@ program initial_arw_ens
   infltnfct_uv=infltnfct
   infltnfct_q=infltnfct
   infltnfct_ps=infltnfct(1)
+
+!  check inflate factor
+   write(iout,*) 'inflate factor'
+   write(iout,'(4a10)') 'level','T', 'UV','q'
+   do k=1, i
+      write(iout,'(I10,3f10.4)') k,infltnfct_t(k),infltnfct_uv(k),infltnfct_q(k)
+   enddo
+   write(iout,'(a,f10.4)') 'surface pressure inflate factor=',infltnfct_ps
 !
 ! figure out the begin and end of member for each core
 !
-  n=n_ens/npe
-  k=mod(n_ens,npe)
-  beginmem(1)=1
-  do i=1,npe
-    if(i>1) beginmem(i)=endmem(i-1)+1
-    if(i<=k) then
-      endmem(i)=beginmem(i)+n
-    else
-      endmem(i)=beginmem(i)+n-1
-    endif
-  enddo
-  write(iout,*) 'beginmem=',mype+1,beginmem(mype+1)
-  write(iout,*) 'endmem=',mype+1,endmem(mype+1)
+  if(npe < num_dom*n_ens) then
+     write(*,*) 'Error, must run this job with more cores!!!'
+     write(*,*) 'The minimum core number is ',num_dom*n_ens
+     call mpi_finalize(ierror)
+     stop 123
+  endif
+  mymemid=mype+1
+  if(mymemid <= num_dom*n_ens) then
+     domainid=(mymemid-1)/n_ens +1   
+     mymemid=mymemid-(domainid-1)*n_ens
+  else
+     domainid=0
+     mymemid=0
+  endif
+  write(iout,*) 'domainid=',domainid,mymemid
 !           open netcdf file to read
   call ext_ncd_ioinit(sysdepinfo,status)
 !
-  flnm1='wrf_inout'
-  call ext_ncd_open_for_read( trim(flnm1), 0, 0, "", dh1, Status)
-  if ( Status /= 0 )then
-     write(iout,*)'save_soil_netcdf_mass:  cannot open flnm1 = ',&
-          trim(flnm1),', Status = ', Status
-     stop 74
-  endif
+  iunit=20
+  if( domainid > 0 .and. mymemid > 0) then
+     write(flnm1,'(a,I2.2)') 'wrfinput_d',domainid
+     call ext_ncd_open_for_read( trim(flnm1), 0, 0, "", dh1, Status)
+     if ( Status /= 0 )then
+        write(iout,*)'save_soil_netcdf_mass:  cannot open flnm1 = ',&
+             trim(flnm1),', Status = ', Status
+        stop 74
+     endif
 !
 !-------------  get date info  from file read in
-
-  call ext_ncd_get_next_time(dh1, DateStr1, Status_next_time)
-  read(DateStr1,'(i4,1x,i2,1x,i2,1x,i2,1x,i2,1x,i2)')   &
-                       iyear,imonth,iday,ihour,iminute,isecond
-  write(iout,'(a,6I5)')' read data from file at time (y,m,d,h,m,s):'    &
-                       ,iyear,imonth,iday,ihour,iminute,isecond
 !
+     call ext_ncd_get_next_time(dh1, DateStr1, Status_next_time)
+     read(DateStr1,'(i4,1x,i2,1x,i2,1x,i2,1x,i2,1x,i2)')   &
+                       iyear,imonth,iday,ihour,iminute,isecond
+     write(iout,'(a,6I5)')' read data from file at time (y,m,d,h,m,s):'    &
+                       ,iyear,imonth,iday,ihour,iminute,isecond
+
 !   get dimensions
-  iunit=20
-  write(filename,'(a,I4.4)') 'en_perts4arw.mem',1
-  write(iout,*) 'read dimension from ', trim(filename)
-  open(iunit,file=trim(filename),form='unformatted')
-     read(iunit) nc3d,nc2d
-     write(*,*) 'dimension is =',nc3d,nc2d
-     allocate(cvars3d(nc3d),cvars2d(nc2d))
-     rewind(iunit)
-     read(iunit) nc3d,nc2d,cvars3d,cvars2d
-     read(iunit) nlat,nlon,nsig
-  close(iunit)
-  write(iout,*) 'nlat,nlon,nsig=',nlat,nlon,nsig
-  write(iout,'(I5,A10,10A6)') nc3d,'cvars3d=',(trim(cvars3d(ic3)),ic3=1,nc3d)
-  write(iout,'(I5,A10,10A6)') nc2d,'cvars2d=',(trim(cvars2d(ic2)),ic2=1,nc2d)
+     write(filename,'(a,I2.2,a,I4.4)') './d',domainid,'/en_perts4arw.mem',mymemid
+     write(iout,*) 'read dimension from ', trim(filename)
+     open(iunit,file=trim(filename),form='unformatted')
+        read(iunit) nc3d,nc2d
+        write(iout,*) 'dimension is =',nc3d,nc2d
+        allocate(cvars3d(nc3d),cvars2d(nc2d))
+        rewind(iunit)
+        read(iunit) nc3d,nc2d,cvars3d,cvars2d
+        read(iunit) nlat,nlon,nsig
 
-  num_fields=nc3d*nsig+nc2d
-  allocate(workh(nlat,nlon))
-  allocate(en_perts(nlat,nlon,num_fields))
+        write(iout,*) 'nlat,nlon,nsig=',nlat,nlon,nsig
+        write(iout,'(I5,A10,10A6)') nc3d,'cvars3d=',(trim(cvars3d(ic3)),ic3=1,nc3d)
+        write(iout,'(I5,A10,10A6)') nc2d,'cvars2d=',(trim(cvars2d(ic2)),ic2=1,nc2d)
 
-!  check inflate factor
-  write(*,*) 'inflate factor'
-  write(*,'(4a10)') 'level','T', 'UV','q'
-  do k=1, nsig
-    write(*,'(I10,3f10.4)') k,infltnfct_t(k),infltnfct_uv(k),infltnfct_q(k)
-  enddo
-  write(*,'(a,f10.4)') 'surface pressure inflate factor=',infltnfct_ps
-
+        num_fields=nc3d*nsig+nc2d
+        allocate(workh(nlat,nlon))
+        allocate(en_perts(nlat,nlon,num_fields))
 !
 !  read perturbations
 !
-  do n=beginmem(mype+1),endmem(mype+1)
-
-     write(filename,'(a,I4.4)') 'en_perts4arw.mem',n
-     write(iout,*) 
-     write(iout,*) 'read perturbations for ', trim(filename)
-     open(iunit,file=trim(filename),form='unformatted')
-        read(iunit) 
-        read(iunit)
+        write(iout,*) 
+        write(iout,*) 'read perturbations for ', trim(filename)
 
         do k=1,num_fields
 
             read(iunit) workh
-!            write(*,*) k,maxval(workh),minval(workh)
+!            write(iout,*) k,maxval(workh),minval(workh)
             do j=1,nlon
                do i=1,nlat
                   en_perts(i,j,k)=workh(i,j)
@@ -216,15 +213,18 @@ program initial_arw_ens
 
         end do
 
+        deallocate(workh)
+
      close(iunit)
 
-     write(flnm_new,'(a,I4.4)') 'wrfinput_d01.mem',n
+     write(flnm_new,'(a,I2.2,a,I4.4)') 'wrfinput_d',domainid,'.mem',mymemid
      call ext_ncd_open_for_update( trim(flnm_new), 0, 0, "", dh2, Status)
      if ( Status /= 0 )then
         write(iout,*)'gen_initial_ensemble:  cannot open flnm = ',&
              trim(flnm_new),', Status = ', Status
         stop 74
      endif
+     write(iout,*) 'generate intial file for =',trim(flnm_new)
 
      rmse_var='T' 
      allocate(field3(nlon,nlat,nsig))
@@ -264,7 +264,7 @@ program initial_arw_ens
               im=max(1,i-1)
               i0=min(nlon,i)
               field3(j,i,k)=field3(j,i,k)+&
-                            half*(en_perts(im,j,k)+en_perts(i0,j,k))*infltnfct_uv(k)
+                            half*(en_perts(im,j,k+nsig)+en_perts(i0,j,k+nsig))*infltnfct_uv(k)
            end do
         end do
      end do
@@ -298,15 +298,14 @@ program initial_arw_ens
      deallocate(field3)
 
      call ext_ncd_ioclose(dh2, Status)
-  enddo ! n
+     call ext_ncd_ioclose(dh1, Status)
 
-  deallocate(workh)
+  endif ! if this core has a member to process
 !
-  call ext_ncd_ioclose(dh1, Status)
 
   call mpi_finalize(ierror) 
 
-end program initial_arw_ens
+end program initial_arw_ens_multidom
 
 SUBROUTINE wrf_debug( level , str )
   IMPLICIT NONE

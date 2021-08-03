@@ -539,11 +539,11 @@ subroutine setuprhsall(ndata,mype,init_pass,last_pass)
   ! luse_obsdiag, sorting could become a problem.  Among them, cases of
   ! l_PBL_pseudo_SurfobsT, l_PBL_pseudo_SurfobsQ, and l_PBL_pseudo_SurfobsUV
   ! have been fixed since, but it might be better to keep it simple for
-  ! those applications.  The case of i_cloud_q_innovation==2 is new.  It is
+  ! those applications.  The case of i_cloud_q_innovation is new.  It is
   ! not sure why it won't work even in case of .not.luse_obsdiag.
 
   if(.not.(l_PBL_pseudo_SurfobsT  .or.  l_PBL_pseudo_SurfobsQ   .or. &
-           l_PBL_pseudo_SurfobsUV .or. (i_cloud_q_innovation==2)) ) then
+           l_PBL_pseudo_SurfobsUV .or. (i_cloud_q_innovation>0)) ) then
      call obsdiags_sort()
   endif
 

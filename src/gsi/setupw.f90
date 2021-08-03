@@ -70,9 +70,11 @@ subroutine setupw(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   use m_dtime, only: dtime_setup, dtime_check
 
   use gsi_bundlemod, only : gsi_bundlegetpointer
+  use hdraobmod, only: nhduv,hduvlist
   use gsi_metguess_mod, only : gsi_metguess_get,gsi_metguess_bundle
   use sparsearr, only: sparr2, new, size, writearray, fullarray
   use aux2dvarflds, only: rtma_comp_fact10
+
 
   ! The following variables are the coefficients that describe the
   ! linear regression fits that are used to define the dynamic
@@ -290,7 +292,7 @@ subroutine setupw(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
   integer(i_kind) ibb,ikk,ihil
   integer(i_kind) msges
 
-  integer(i_kind) num_bad_ikx
+  integer(i_kind) num_bad_ikx,iprev_station
 
   character(8) station_id
   character(8),allocatable,dimension(:):: cdiagbuf
@@ -413,9 +415,41 @@ subroutine setupw(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
      if (netcdf_diag) call init_netcdf_diag_
   end if
 
+  num_bad_ikx=0
   do i=1,nobs
      muse(i)=nint(data(iuse,i)) <= jiter
+     ikx=nint(data(ikxx,i))
+     if(ikx < 1 .or. ikx > nconvtype) then
+        num_bad_ikx=num_bad_ikx+1
+        if(num_bad_ikx<=10) write(6,*)' in setupw ',ikx,i,nconvtype,mype
+     end if
   end do
+!  If HD raobs available move prepbufr version to monitor
+  if(nhduv > 0)then
+     iprev_station=0
+     do i=1,nobs
+        ikx=nint(data(ikxx,i))
+        itype=ictype(ikx)
+        if(itype == 220 .or. itype == 221) then
+           rstation_id     = data(id,i)
+           read(station_id,'(i5,3x)',err=1200) idddd
+           if(idddd == iprev_station)then
+             data(iuse,i)=108._r_kind
+             muse(i) = .false.
+           else
+              stn_loop:do j=1,nhduv
+                if(idddd == hduvlist(j))then
+                   iprev_station=idddd
+                   data(iuse,i)=108._r_kind
+                   muse(i) = .false.
+                   exit stn_loop
+                end if
+              end do stn_loop
+           end if
+        end if
+1200    continue
+     end do
+  end if
 
 !  handle multiple-report observations at a station
   hr_offset=min_offset/60.0_r_kind
@@ -472,7 +506,7 @@ subroutine setupw(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
         var_jb=data(ijb,i)
         if(ikx < 1 .or. ikx > nconvtype) then
            num_bad_ikx=num_bad_ikx+1
-           if(num_bad_ikx<=10) write(6,*)' in setupw, bad ikx, ikx,i,nconvtype=',ikx,i,nconvtype
+           if(num_bad_ikx<=10) write(6,*)' in setupw, bad ikx, ikx,i,nconvtype=',ikx,i,nconvtype,mype
            cycle
         end if
         isli = data(idomsfc,i)
@@ -579,6 +613,7 @@ subroutine setupw(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
      z_height = .false.
      if ((itype>=221 .and. itype <= 229) .and. (data(ihgt,i)<r0_1_bmiss)) z_height = .true.
      if ((itype==261) .and. (data(ihgt,i)<r0_1_bmiss)) z_height = .true.
+     if (itype == 218) z_height = .true.
 
 
 !    Process observations reported with height differently than those
@@ -623,7 +658,7 @@ subroutine setupw(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
 !       For observation reported with geometric height above sea level,
 !       convert geopotential to geometric height.
 
-        if (((itype>=223 .and. itype<=228) .or. sfc_data) .and. .not.twodvar_regional) then
+        if (((itype>=223 .and. itype<=228) .or. itype == 218 .or. sfc_data) .and. .not.twodvar_regional) then
 !          Convert geopotential height at layer midpoints to geometric 
 !          height using equations (17, 20, 23) in MJ Mahoney's note 
 !          "A discussion of various measures of altitude" (2001).  
