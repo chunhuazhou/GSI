@@ -848,8 +848,16 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
        allocate(dim_id(ndim))
        iret=nf90_inquire_variable(gfile_loc,i,dimids=dim_id)
        if(allocated(sfc       )) deallocate(sfc       )
-       allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
-       iret=nf90_get_var(gfile_loc,i,sfc)
+       if(ndim >=3) then
+          allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
+          iret=nf90_get_var(gfile_loc,i,sfc)
+       else if (ndim == 2) then
+          allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),1))
+          iret=nf90_get_var(gfile_loc,i,sfc(:,:,1))
+       else
+          write(*,*) "wrong dimension number ndim =",ndim
+          call stop2(119)
+       endif
        call fv3_h_to_ll(sfc(:,:,1),a,nx,ny,nxa,nya,grid_reverse_flag)
 
        kk=0
