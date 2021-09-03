@@ -229,12 +229,21 @@ git log -1 | head -n1 >> output.log
 echo -e "\ngit status:" >> output.log
 git status >> output.log
 echo -e "\nCompiling commands:" >> output.log
+
+BUILD_KJET=OFF
+if [[ ! -z $1 ]]; then
+  case $1 in
+    kjet|kJet|KJET|Kjet|kJET)
+      BUILD_KJET=ON
+      ;;
+  esac
+fi
 echo "  cmake -DCOMGSI=ON -DENKF_MODE=WRF -DBUILD_GSDCLOUD_ARW=ON -DBUILD_ENKF_PREPROCESS_ARW=ON -DBUILD_UTIL_COM=ON .." >> output.log
+echo "  -DBUILD_KJET=${BUILD_KJET}" >> output.log
 echo "  make -j8" >> output.log
 cat output.log
 
-
-cmake -DCOMGSI=ON -DENKF_MODE=WRF -DBUILD_GSDCLOUD_ARW=ON -DBUILD_ENKF_PREPROCESS_ARW=ON -DBUILD_UTIL_COM=ON ..  2>&1  | tee output.cmake
+cmake -DCOMGSI=ON -DENKF_MODE=WRF -DBUILD_GSDCLOUD_ARW=ON -DBUILD_ENKF_PREPROCESS_ARW=ON -DBUILD_UTIL_COM=ON -DBUILD_KJET=${BUILD_KJET} ..  2>&1  | tee output.cmake
 make -j 8 2>&1 | tee output.compile
 
 ###aftermath
