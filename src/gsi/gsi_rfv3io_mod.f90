@@ -1710,7 +1710,6 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
     integer(i_kind),allocatable,dimension(:)::wrt_pe
     logical :: is_wrtpe
 
-    if(mype==0) print *,'working on u and v'
     mm1=mype+1
     is_wrtpe=.false.
 
@@ -1728,6 +1727,7 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
     mywrtpe=-1
     if (is_wrtpe) then
       call MPI_Comm_rank(mpi_comm_wrt, mywrtpe, ierror);
+      if(mywrtpe==0) print *,'working on u and v'
     endif
 
     allocate(    work(max(iglobal,itotsub)*nsig),work_sub(lat1,lon1,nsig))
@@ -1931,7 +1931,6 @@ subroutine gsi_fv3ncdf_writeps(filename,varname,var,mype_io,add_saved)
     integer(i_kind),allocatable,dimension(:)::wrt_pe
     logical :: is_wrtpe
 
-    if(mype==0) print *,'working on ps'
     mm1=mype+1
     is_wrtpe=.false.
 
@@ -1949,6 +1948,7 @@ subroutine gsi_fv3ncdf_writeps(filename,varname,var,mype_io,add_saved)
     mywrtpe=-1
     if (is_wrtpe) then
       call MPI_Comm_rank(mpi_comm_wrt, mywrtpe, ierror);
+      if(mywrtpe==0) print *,'working on ps'
     endif
 
     allocate(    work(max(iglobal,itotsub)),work_sub(lat1,lon1) )
@@ -2416,7 +2416,6 @@ subroutine gsi_fv3ncdf_write(filename,varname,var,mype_io,add_saved)
     integer(i_kind),allocatable,dimension(:)::wrt_pe
     logical :: is_wrtpe
 
-    if(mype==0) print *, 'working on ', trim(varname)
     mm1=mype+1
     is_wrtpe=.false.
 
@@ -2434,6 +2433,7 @@ subroutine gsi_fv3ncdf_write(filename,varname,var,mype_io,add_saved)
     mywrtpe=-1
     if (is_wrtpe) then
       call MPI_Comm_rank(mpi_comm_wrt, mywrtpe, ierror);
+      if(mywrtpe==0) print *, 'working on ', trim(varname)
     endif
 
     allocate(    work(max(iglobal,itotsub)*nsig),work_sub(lat1,lon1,nsig))
@@ -2572,7 +2572,6 @@ subroutine gsi_fv3ncdf_write_fv3_dz(filename,varname,varinc,mype_io,add_saved)
     integer(i_kind),allocatable,dimension(:)::wrt_pe
     logical :: is_wrtpe
 
-    if(mype==0) print *, 'working on dz'
     mm1=mype+1
     is_wrtpe=.false.
 
@@ -2590,6 +2589,7 @@ subroutine gsi_fv3ncdf_write_fv3_dz(filename,varname,varinc,mype_io,add_saved)
     mywrtpe=-1
     if (is_wrtpe) then
       call MPI_Comm_rank(mpi_comm_wrt, mywrtpe, ierror);
+      if(mywrtpe==0) print *, 'working on dz'
     endif
 
     allocate(    work(max(iglobal,itotsub)*nsig),work_sub(lat1,lon1,nsig))
