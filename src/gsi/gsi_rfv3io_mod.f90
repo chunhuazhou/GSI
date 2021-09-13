@@ -1573,6 +1573,7 @@ subroutine wrfv3_netcdf(fv3filenamegin)
 !
 ! program history log:
 ! 2021-01-05  x.zhang/lei  - add code for updating delz analysis in regional da
+! 2021-09-08  Guoqing Ge   - add parallel netcdf writing to speed up run time
 !
 !   input argument list:
 !
@@ -1588,9 +1589,11 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     use gsi_metguess_mod, only: gsi_metguess_bundle
     use gsi_bundlemod, only: gsi_bundlegetpointer
     use mpeu_util, only: die
+    use mpimod, only: mype
 
     use gridmod,only: l_reg_update_hydro_delz
     use gridmod, only: lat2,lon2,nsig
+    use gridmod, only: rfv3_pe_T,rfv3_pe_v,rfv3_pe_q,rfv3_pe_ps,rfv3_pe_dz
     use guess_grids, only:geom_hgti,geom_hgti_bg
 
     implicit none
@@ -1624,17 +1627,18 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     add_saved=.true.
 
 !   write out
+    if (mype==0) print *, 'Writing out analysis results to fv3 NetCDF files......'
     if(fv3sar_bg_opt == 0) then
-       call gsi_fv3ncdf_write(dynvars,'T',ges_tsen(1,1,1,it),mype_t,add_saved)
-       call gsi_fv3ncdf_write(tracers,'sphum',ges_q   ,mype_q,add_saved)
-       call gsi_fv3ncdf_writeuv(dynvars,ges_u,ges_v,mype_v,add_saved)
-       call gsi_fv3ncdf_writeps(dynvars,'delp',ges_ps,mype_p,add_saved)
+       call gsi_fv3ncdf_write(dynvars,'T',ges_tsen(1,1,1,it),rfv3_pe_T,add_saved)
+       call gsi_fv3ncdf_write(tracers,'sphum',ges_q,rfv3_pe_q,add_saved)
+       call gsi_fv3ncdf_writeuv(dynvars,ges_u,ges_v,rfv3_pe_v,add_saved)
+       call gsi_fv3ncdf_writeps(dynvars,'delp',ges_ps,rfv3_pe_ps,add_saved)
        if(l_reg_update_hydro_delz) then
           allocate(ges_delzinc(lat2,lon2,nsig))
           do k=1,nsig
              ges_delzinc(:,:,k)=geom_hgti(:,:,k+1,it)-geom_hgti_bg(:,:,k+1,it)-geom_hgti(:,:,k,it)+geom_hgti_bg(:,:,k,it)
           enddo
-          call gsi_fv3ncdf_write_fv3_dz(dynvars,"DZ",ges_delzinc,mype_delz,add_saved)
+          call gsi_fv3ncdf_write_fv3_dz(dynvars,"DZ",ges_delzinc,rfv3_pe_dz,add_saved)
           deallocate(ges_delzinc)
        endif
 
@@ -1673,16 +1677,17 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
 !
 !$$$ end documentation block
 
-    use mpimod, only:  mpi_rtype,mpi_comm_world,ierror,npe,mype
+    use mpimod, only:  mpi_rtype,mpi_comm_world,ierror,npe,mype,MPI_INFO_NULL
     use gridmod, only: lat2,lon2,nlon,nlat,lat1,lon1,nsig, &
                        ijn,displs_g,itotsub,iglobal, &
                        nlon_regional,nlat_regional
+    use gridmod, only: npePgrp_rfv3
     use mod_fv3_lola, only: fv3_ll_to_h,fv3_h_to_ll, &
                             fv3uv2earth,earthuv2fv3
     use general_commvars_mod, only: ltosi,ltosj
     use netcdf, only: nf90_open,nf90_close,nf90_noerr
-    use netcdf, only: nf90_write,nf90_inq_varid
-    use netcdf, only: nf90_put_var,nf90_get_var
+    use netcdf, only: nf90_write,nf90_inq_varid,nf90_var_par_access
+    use netcdf, only: nf90_put_var,nf90_get_var,nf90_collective
 
     implicit none
     character(len=*),intent(in) :: dynvars   !='fv3_dynvars'
@@ -1692,15 +1697,38 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
     integer(i_kind),intent(in   ) :: mype_io
     logical        ,intent(in   ) :: add_saved
 
-    integer(i_kind) :: ugrd_VarId,gfile_loc,vgrd_VarId
+    integer(i_kind) :: gfile_loc,ugrd_VarId,vgrd_VarId
+    integer(i_kind) :: mywrtpe, stride, zcount
+    integer(i_kind) :: mystart(3), mycount(3)
+    integer(i_kind) :: mpi_comm_wrt, world_group, wrt_group
     integer(i_kind) i,j,mm1,n,k,ns,kr,m
     real(r_kind),allocatable,dimension(:):: work
     real(r_kind),allocatable,dimension(:,:,:):: work_sub,work_au,work_av
     real(r_kind),allocatable,dimension(:,:,:):: work_bu,work_bv
     real(r_kind),allocatable,dimension(:,:):: u,v,workau2,workav2
     real(r_kind),allocatable,dimension(:,:):: workbu2,workbv2
+    integer(i_kind),allocatable,dimension(:)::wrt_pe
+    logical :: is_wrtpe
 
+    if(mype==0) print *,'working on u and v'
     mm1=mype+1
+    is_wrtpe=.false.
+
+    !create  mpi_comm_wrt
+    allocate(wrt_pe(npePgrp_rfv3))
+    do i=1,npePgrp_rfv3
+       wrt_pe(i)=mype_io+i-1
+    enddo
+    call MPI_COMM_GROUP(MPI_COMM_WORLD, world_group, ierror)
+    if (any(wrt_pe==mype)) then
+      call MPI_GROUP_INCL(world_group, npePgrp_rfv3, wrt_pe, wrt_group, ierror)
+      call MPI_COMM_CREATE_GROUP(MPI_COMM_WORLD, wrt_group, 0, mpi_comm_wrt, ierror)
+      is_wrtpe=.true.
+    endif 
+    mywrtpe=-1
+    if (is_wrtpe) then
+      call MPI_Comm_rank(mpi_comm_wrt, mywrtpe, ierror);
+    endif
 
     allocate(    work(max(iglobal,itotsub)*nsig),work_sub(lat1,lon1,nsig))
 !!!!!! gather analysis u !! revers k !!!!!!!!!!!
@@ -1712,10 +1740,12 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
           end do
        end do
     enddo
-    call mpi_gatherv(work_sub,ijnz(mm1),mpi_rtype, &
-          work,ijnz,displsz_g,mpi_rtype,mype_io,mpi_comm_world,ierror)
+    do i=1,npePgrp_rfv3
+      call mpi_gatherv(work_sub,ijnz(mm1),mpi_rtype, &
+          work,ijnz,displsz_g,mpi_rtype,wrt_pe(i),mpi_comm_world,ierror)
+    enddo
 
-    if(mype==mype_io) then
+    if(is_wrtpe) then
        allocate( work_au(nlat,nlon,nsig),work_av(nlat,nlon,nsig))
        ns=0
        do m=1,npe
@@ -1726,7 +1756,7 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
              end do
           enddo
        enddo
-    endif  ! mype
+    endif  ! is_wrtpe
 
 !!!!!! gather analysis v !! reverse k !!!!!!!!!!!!!!!!!!
     do k=1,nsig
@@ -1737,10 +1767,17 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
           end do
        end do
     enddo
-    call mpi_gatherv(work_sub,ijnz(mm1),mpi_rtype, &
-          work,ijnz,displsz_g,mpi_rtype,mype_io,mpi_comm_world,ierror)
+    do i=1,npePgrp_rfv3
+      call mpi_gatherv(work_sub,ijnz(mm1),mpi_rtype, &
+          work,ijnz,displsz_g,mpi_rtype,wrt_pe(i),mpi_comm_world,ierror)
+    enddo
 
-    if(mype==mype_io) then
+    if(is_wrtpe) then
+       stride=NINT(nsig*1.0/npePgrp_rfv3)
+       mystart=(/1,1,mywrtpe*stride+1/) !pe starts at 0
+       zcount=stride
+       if (mywrtpe==npePgrp_rfv3-1) zcount=nsig-mywrtpe*stride
+
        ns=0
        do m=1,npe
           do k=1,nsig
@@ -1753,32 +1790,47 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
        deallocate(work,work_sub)
        allocate( u(nlon_regional,nlat_regional+1))
        allocate( v(nlon_regional+1,nlat_regional))
-       allocate( work_bu(nlon_regional,nlat_regional+1,nsig))
-       allocate( work_bv(nlon_regional+1,nlat_regional,nsig))
-       call check( nf90_open(trim(dynvars ),nf90_write,gfile_loc) )
-       call check( nf90_inq_varid(gfile_loc,'u',ugrd_VarId) )
-       call check( nf90_inq_varid(gfile_loc,'v',vgrd_VarId) )
+       allocate( work_bu(nlon_regional,nlat_regional+1,zcount))
+       allocate( work_bv(nlon_regional+1,nlat_regional,zcount))
+       if (npePgrp_rfv3==1) then
+          call check( nf90_open(trim(dynvars ),nf90_write,gfile_loc) )
+          call check( nf90_inq_varid(gfile_loc,'u',ugrd_VarId) )
+          call check( nf90_inq_varid(gfile_loc,'v',vgrd_VarId) )
+       elseif (npePgrp_rfv3>=2) then
+          call check( nf90_open(trim(dynvars ),nf90_write,gfile_loc,comm=mpi_comm_wrt,info=MPI_INFO_NULL) )
+          call check( nf90_inq_varid(gfile_loc,'u',ugrd_VarId) )
+          call check( nf90_inq_varid(gfile_loc,'v',vgrd_VarId) )
+          call check(nf90_var_par_access(gfile_loc, ugrd_VarId, nf90_collective))! Unlimited dimensions require collective writes
+          call check(nf90_var_par_access(gfile_loc, vgrd_VarId, nf90_collective))! Unlimited dimensions require collective writes
+       end if
 
        if(add_saved)then
           allocate( workau2(nlat,nlon),workav2(nlat,nlon))
           allocate( workbu2(nlon_regional,nlat_regional+1))
           allocate( workbv2(nlon_regional+1,nlat_regional))
 !!!!!!!!  readin work_b !!!!!!!!!!!!!!!!
-          call check( nf90_get_var(gfile_loc,ugrd_VarId,work_bu) )
-          call check( nf90_get_var(gfile_loc,vgrd_VarId,work_bv) )
+          if (npePgrp_rfv3==1) then
+             call check( nf90_get_var(gfile_loc,ugrd_VarId,work_bu) )
+             call check( nf90_get_var(gfile_loc,vgrd_VarId,work_bv) )
+          elseif (npePgrp_rfv3>=2) then
+             mycount=(/nlon_regional, nlat_regional+1, zcount/)
+             call check( nf90_get_var(gfile_loc,ugrd_VarId,work_bu,start = mystart,count = mycount) )
+             mycount=(/nlon_regional+1, nlat_regional, zcount/)
+             call check( nf90_get_var(gfile_loc,vgrd_VarId,work_bv,start = mystart,count = mycount) )
+          end if
           if(.not.grid_reverse_flag) then
-             call reverse_grid_r_uv(work_bu,nlon_regional,nlat_regional+1,nsig)
-             call reverse_grid_r_uv(work_bv,nlon_regional+1,nlat_regional,nsig)
+             call reverse_grid_r_uv(work_bu,nlon_regional,nlat_regional+1,zcount)
+             call reverse_grid_r_uv(work_bv,nlon_regional+1,nlat_regional,zcount)
           endif
-          do k=1,nsig
+          do k=1,zcount
              call fv3uv2earth(work_bu(1,1,k),work_bv(1,1,k),nlon_regional,nlat_regional,u,v)
              call fv3_h_to_ll(u,workau2,nlon_regional,nlat_regional,nlon,nlat,.true.)
              call fv3_h_to_ll(v,workav2,nlon_regional,nlat_regional,nlon,nlat,.true.)
 !!!!!!!! find analysis_inc:  work_a !!!!!!!!!!!!!!!!
-             work_au(:,:,k)=work_au(:,:,k)-workau2(:,:)
-             work_av(:,:,k)=work_av(:,:,k)-workav2(:,:)
-             call fv3_ll_to_h(work_au(:,:,k),u,nlon,nlat,nlon_regional,nlat_regional,.true.)
-             call fv3_ll_to_h(work_av(:,:,k),v,nlon,nlat,nlon_regional,nlat_regional,.true.)
+             work_au(:,:,k+mystart(3)-1)=work_au(:,:,k+mystart(3)-1)-workau2(:,:)
+             work_av(:,:,k+mystart(3)-1)=work_av(:,:,k+mystart(3)-1)-workav2(:,:)
+             call fv3_ll_to_h(work_au(:,:,k+mystart(3)-1),u,nlon,nlat,nlon_regional,nlat_regional,.true.)
+             call fv3_ll_to_h(work_av(:,:,k+mystart(3)-1),v,nlon,nlat,nlon_regional,nlat_regional,.true.)
              call earthuv2fv3(u,v,nlon_regional,nlat_regional,workbu2,workbv2)
 !!!!!!!!  add analysis_inc to readin work_b !!!!!!!!!!!!!!!!
              work_bu(:,:,k)=work_bu(:,:,k)+workbu2(:,:)
@@ -1786,25 +1838,41 @@ subroutine gsi_fv3ncdf_writeuv(dynvars,varu,varv,mype_io,add_saved)
           enddo
           deallocate(workau2,workbu2,workav2,workbv2)
        else
-          do k=1,nsig
-             call fv3_ll_to_h(work_au(:,:,k),u,nlon,nlat,nlon_regional,nlat_regional,.true.)
-             call fv3_ll_to_h(work_av(:,:,k),v,nlon,nlat,nlon_regional,nlat_regional,.true.)
+          do k=1,zcount
+             call fv3_ll_to_h(work_au(:,:,k+mystart(3)-1),u,nlon,nlat,nlon_regional,nlat_regional,.true.)
+             call fv3_ll_to_h(work_av(:,:,k+mystart(3)-1),v,nlon,nlat,nlon_regional,nlat_regional,.true.)
              call earthuv2fv3(u,v,nlon_regional,nlat_regional,work_bu(:,:,k),work_bv(:,:,k))
           enddo
        endif
        if(.not.grid_reverse_flag) then
-          call reverse_grid_r_uv(work_bu,nlon_regional,nlat_regional+1,nsig)
-          call reverse_grid_r_uv(work_bv,nlon_regional+1,nlat_regional,nsig)
+          call reverse_grid_r_uv(work_bu,nlon_regional,nlat_regional+1,zcount)
+          call reverse_grid_r_uv(work_bv,nlon_regional+1,nlat_regional,zcount)
        endif
-
        deallocate(work_au,work_av,u,v)
-       print *,'write out u/v to ',trim(dynvars )
-       call check( nf90_put_var(gfile_loc,ugrd_VarId,work_bu) )
-       call check( nf90_put_var(gfile_loc,vgrd_VarId,work_bv) )
+
+       if(mywrtpe==0) print *,'write out u to ',trim(dynvars )
+       if (npePgrp_rfv3==1) then
+          call check( nf90_put_var(gfile_loc,ugrd_VarId,work_bu) )
+       elseif (npePgrp_rfv3>=2) then
+          mycount=(/nlon_regional, nlat_regional+1, zcount/)
+          call check( nf90_put_var(gfile_loc,ugrd_VarId,work_bu,start = mystart,count = mycount) )
+       end if
+
+       if(mywrtpe==0) print *,'write out v to ',trim(dynvars )
+       if (npePgrp_rfv3==1) then
+          call check( nf90_put_var(gfile_loc,vgrd_VarId,work_bv) )
+       elseif (npePgrp_rfv3>=2) then
+          mycount=(/nlon_regional+1, nlat_regional, zcount/)
+          call check( nf90_put_var(gfile_loc,vgrd_VarId,work_bv,start = mystart,count = mycount) )
+       end if
        call check( nf90_close(gfile_loc) )
        deallocate(work_bu,work_bv)
-    end if !mype_io
 
+       call MPI_Group_free(wrt_group,ierror);
+       call MPI_Comm_free(mpi_comm_wrt);
+    end if ! is_wrtpe
+
+    call MPI_Group_free(world_group,ierror);
     if(allocated(work))deallocate(work)
     if(allocated(work_sub))deallocate(work_sub)
 
@@ -1834,15 +1902,16 @@ subroutine gsi_fv3ncdf_writeps(filename,varname,var,mype_io,add_saved)
 !
 !$$$ end documentation block
 
-    use mpimod, only: mpi_rtype,mpi_comm_world,ierror,mype
+    use mpimod, only: mpi_rtype,mpi_comm_world,ierror,mype,MPI_INFO_NULL
     use gridmod, only: lat2,lon2,nlon,nlat,lat1,lon1,nsig
     use gridmod, only: ijn,displs_g,itotsub,iglobal
     use gridmod,  only: nlon_regional,nlat_regional,eta1_ll,eta2_ll
+    use gridmod, only: npePgrp_rfv3
     use mod_fv3_lola, only: fv3_ll_to_h,fv3_h_to_ll
     use general_commvars_mod, only: ltosi,ltosj
     use netcdf, only: nf90_open,nf90_close
-    use netcdf, only: nf90_write,nf90_inq_varid
-    use netcdf, only: nf90_put_var,nf90_get_var
+    use netcdf, only: nf90_write,nf90_inq_varid,nf90_var_par_access
+    use netcdf, only: nf90_put_var,nf90_get_var,nf90_collective
     implicit none
 
     real(r_kind)   ,intent(in   ) :: var(lat2,lon2)
@@ -1851,36 +1920,77 @@ subroutine gsi_fv3ncdf_writeps(filename,varname,var,mype_io,add_saved)
     character(*)   ,intent(in   ) :: varname,filename
 
     integer(i_kind) :: VarId,gfile_loc
+    integer(i_kind) :: mywrtpe, stride, zcount
+    integer(i_kind) :: mystart(3), mycount(3)
+    integer(i_kind) :: mpi_comm_wrt, world_group, wrt_group
     integer(i_kind) i,j,mm1,k,kr,kp
     real(r_kind),allocatable,dimension(:):: work
     real(r_kind),allocatable,dimension(:,:):: work_sub,work_a
     real(r_kind),allocatable,dimension(:,:,:):: work_b,work_bi
     real(r_kind),allocatable,dimension(:,:):: workb2,worka2
+    integer(i_kind),allocatable,dimension(:)::wrt_pe
+    logical :: is_wrtpe
 
+    if(mype==0) print *,'working on ps'
     mm1=mype+1
+    is_wrtpe=.false.
+
+    !create  mpi_comm_wrt
+    allocate(wrt_pe(npePgrp_rfv3))
+    do i=1,npePgrp_rfv3
+       wrt_pe(i)=mype_io+i-1
+    enddo
+    call MPI_COMM_GROUP(MPI_COMM_WORLD, world_group, ierror)
+    if (any(wrt_pe==mype)) then
+      call MPI_GROUP_INCL(world_group, npePgrp_rfv3, wrt_pe, wrt_group, ierror)
+      call MPI_COMM_CREATE_GROUP(MPI_COMM_WORLD, wrt_group, 0, mpi_comm_wrt, ierror)
+      is_wrtpe=.true.
+    endif
+    mywrtpe=-1
+    if (is_wrtpe) then
+      call MPI_Comm_rank(mpi_comm_wrt, mywrtpe, ierror);
+    endif
+
     allocate(    work(max(iglobal,itotsub)),work_sub(lat1,lon1) )
     do i=1,lon1
        do j=1,lat1
           work_sub(j,i)=var(j+1,i+1)
        end do
     end do
-    call mpi_gatherv(work_sub,ijn(mm1),mpi_rtype, &
-          work,ijn,displs_g,mpi_rtype,mype_io,mpi_comm_world,ierror)
-    if(mype==mype_io) then
+
+    do i=1,npePgrp_rfv3
+      call mpi_gatherv(work_sub,ijn(mm1),mpi_rtype, &
+          work,ijn,displs_g,mpi_rtype,wrt_pe(i),mpi_comm_world,ierror)
+    enddo
+    if(is_wrtpe) then  
+       stride=NINT(nsig*1.0/npePgrp_rfv3)
+       mystart=(/1,1,mywrtpe*stride+1/) !pe starts at 0
+       zcount=stride
+       if (mywrtpe==npePgrp_rfv3-1) zcount=nsig-mywrtpe*stride
+       mycount=(/nlon_regional, nlat_regional, zcount/)
+
        allocate( work_a(nlat,nlon))
        do i=1,iglobal
           work_a(ltosi(i),ltosj(i))=work(i)
        end do
        allocate( work_bi(nlon_regional,nlat_regional,nsig+1))
        allocate( work_b(nlon_regional,nlat_regional,nsig))
-       call check( nf90_open(trim(filename),nf90_write,gfile_loc) )
-       call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+       if (npePgrp_rfv3==1) then
+         call check( nf90_open(trim(filename),nf90_write,gfile_loc) )
+         call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+       elseif (npePgrp_rfv3>=2) then
+         call check( nf90_open(trim(filename),nf90_write,gfile_loc,comm=mpi_comm_wrt,info=MPI_INFO_NULL) )
+         call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+         call check(nf90_var_par_access(gfile_loc,VarId,nf90_collective))! Unlimited dimensions require collective writes
+       end if
        allocate( workb2(nlon_regional,nlat_regional))
 
        if(add_saved)then
           allocate( worka2(nlat,nlon))
 !!!!!!!! read in guess delp  !!!!!!!!!!!!!!
           call check( nf90_get_var(gfile_loc,VarId,work_b) )
+!"delp" processing is both horizontal and height-dependent,read split in z direction not considered
+
           work_bi(:,:,1)=eta1_ll(nsig+1)
           do i=2,nsig+1
              work_bi(:,:,i)=work_b(:,:,i-1)*0.001_r_kind+work_bi(:,:,i-1)
@@ -1909,15 +2019,22 @@ subroutine gsi_fv3ncdf_writeps(filename,varname,var,mype_io,add_saved)
           work_b(:,:,k)=(work_bi(:,:,kp)-work_bi(:,:,k))*1000._r_kind
        enddo
   
-       call check( nf90_put_var(gfile_loc,VarId,work_b) )
+       if(mywrtpe==0) print *,'write out ps to ',trim(filename )
+       if (npePgrp_rfv3==1) then
+          call check( nf90_put_var(gfile_loc,VarId,work_b) )
+       elseif (npePgrp_rfv3>=2) then
+          call check( nf90_put_var(gfile_loc,VarId,work_b(:,:,mystart(3):(mystart(3)+mycount(3)-1)),start=mystart,count=mycount) )
+       end if
        call check( nf90_close(gfile_loc) )
        if (allocated(worka2)) deallocate(worka2)
        if (allocated(workb2)) deallocate(workb2)
 
        deallocate(work_b,work_a,work_bi)
+       call MPI_Group_free(wrt_group,ierror);
+       call MPI_Comm_free(mpi_comm_wrt);
+    end if !is_wrtpe
 
-    end if !mype_io
-
+    call MPI_Group_free(world_group,ierror);
     deallocate(work,work_sub)
 end subroutine gsi_fv3ncdf_writeps
 subroutine gsi_fv3ncdf_writeuv_v1(dynvars,varu,varv,mype_io,add_saved)
@@ -2270,15 +2387,16 @@ subroutine gsi_fv3ncdf_write(filename,varname,var,mype_io,add_saved)
 !
 !$$$ end documentation block
 
-    use mpimod, only: mpi_rtype,mpi_comm_world,ierror,npe,mype
+    use mpimod, only: mpi_rtype,mpi_comm_world,ierror,npe,mype,MPI_INFO_NULL
     use gridmod, only: lat2,lon2,nlon,nlat,lat1,lon1,nsig
     use gridmod, only: ijn,displs_g,itotsub,iglobal
+    use gridmod, only: npePgrp_rfv3
     use mod_fv3_lola, only: fv3_ll_to_h
     use mod_fv3_lola, only: fv3_h_to_ll
     use general_commvars_mod, only: ltosi,ltosj
     use netcdf, only: nf90_open,nf90_close
-    use netcdf, only: nf90_write,nf90_inq_varid
-    use netcdf, only: nf90_put_var,nf90_get_var
+    use netcdf, only: nf90_write,nf90_inq_varid,nf90_var_par_access
+    use netcdf, only: nf90_put_var,nf90_get_var,nf90_collective
     implicit none
 
     real(r_kind)   ,intent(in   ) :: var(lat2,lon2,nsig)
@@ -2286,15 +2404,37 @@ subroutine gsi_fv3ncdf_write(filename,varname,var,mype_io,add_saved)
     logical        ,intent(in   ) :: add_saved
     character(*)   ,intent(in   ) :: varname,filename
 
+    integer(i_kind) :: mywrtpe, stride, zcount
+    integer(i_kind) :: mystart(3), mycount(3)
+    integer(i_kind) :: mpi_comm_wrt, world_group, wrt_group
     integer(i_kind) :: VarId,gfile_loc
     integer(i_kind) i,j,mm1,k,kr,ns,n,m
     real(r_kind),allocatable,dimension(:):: work
     real(r_kind),allocatable,dimension(:,:,:):: work_sub,work_a
     real(r_kind),allocatable,dimension(:,:,:):: work_b
     real(r_kind),allocatable,dimension(:,:):: workb2,worka2
+    integer(i_kind),allocatable,dimension(:)::wrt_pe
+    logical :: is_wrtpe
 
-
+    if(mype==0) print *, 'working on ', trim(varname)
     mm1=mype+1
+    is_wrtpe=.false.
+
+    !create  mpi_comm_wrt
+    allocate(wrt_pe(npePgrp_rfv3))
+    do i=1,npePgrp_rfv3
+       wrt_pe(i)=mype_io+i-1
+    enddo
+    call MPI_COMM_GROUP(MPI_COMM_WORLD, world_group, ierror)
+    if (any(wrt_pe==mype)) then
+      call MPI_GROUP_INCL(world_group, npePgrp_rfv3, wrt_pe, wrt_group, ierror)
+      call MPI_COMM_CREATE_GROUP(MPI_COMM_WORLD, wrt_group, 0, mpi_comm_wrt, ierror)
+      is_wrtpe=.true.
+    endif
+    mywrtpe=-1
+    if (is_wrtpe) then
+      call MPI_Comm_rank(mpi_comm_wrt, mywrtpe, ierror);
+    endif
 
     allocate(    work(max(iglobal,itotsub)*nsig),work_sub(lat1,lon1,nsig))
 !!!!!!!! reverse z !!!!!!!!!!!!!!
@@ -2306,10 +2446,18 @@ subroutine gsi_fv3ncdf_write(filename,varname,var,mype_io,add_saved)
           end do
        end do
     enddo
-    call mpi_gatherv(work_sub,ijnz(mm1),mpi_rtype, &
-          work,ijnz,displsz_g,mpi_rtype,mype_io,mpi_comm_world,ierror)
+    do i=1,npePgrp_rfv3
+       call mpi_gatherv(work_sub,ijnz(mm1),mpi_rtype, &
+          work,ijnz,displsz_g,mpi_rtype,wrt_pe(i),mpi_comm_world,ierror)
+    enddo
 
-    if(mype==mype_io) then
+    if(is_wrtpe) then
+       stride=NINT(nsig*1.0/npePgrp_rfv3)
+       mystart=(/1,1,mywrtpe*stride+1/) !pe starts at 0
+       zcount=stride
+       if (mywrtpe==npePgrp_rfv3-1) zcount=nsig-mywrtpe*stride
+       mycount=(/nlon_regional, nlat_regional, zcount/)
+
        allocate( work_a(nlat,nlon,nsig))
        ns=0
        do m=1,npe
@@ -2321,37 +2469,53 @@ subroutine gsi_fv3ncdf_write(filename,varname,var,mype_io,add_saved)
           enddo
        enddo
 
-       allocate( work_b(nlon_regional,nlat_regional,nsig))
+       allocate( work_b(nlon_regional,nlat_regional,zcount))
 
-       call check( nf90_open(trim(filename),nf90_write,gfile_loc) )
-       call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
-
+       if (npePgrp_rfv3==1) then
+         call check( nf90_open(trim(filename),nf90_write,gfile_loc) )
+         call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+       elseif (npePgrp_rfv3>=2) then
+         call check( nf90_open(trim(filename),nf90_write,gfile_loc,comm=mpi_comm_wrt,info=MPI_INFO_NULL) )
+         call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+         call check(nf90_var_par_access(gfile_loc,VarId,nf90_collective))! Unlimited dimensions require collective writes
+       end if
 
        if(add_saved)then
           allocate( workb2(nlon_regional,nlat_regional))
           allocate( worka2(nlat,nlon))
-          call check( nf90_get_var(gfile_loc,VarId,work_b) )
+          if (npePgrp_rfv3==1) then
+            call check( nf90_get_var(gfile_loc,VarId,work_b) )
+          elseif (npePgrp_rfv3>=2) then
+            call check( nf90_get_var(gfile_loc,VarId,work_b,start=mystart,count=mycount) )
+          end if
 
-          do k=1,nsig
+          do k=1,zcount
              call fv3_h_to_ll(work_b(:,:,k),worka2,nlon_regional,nlat_regional,nlon,nlat,grid_reverse_flag)
 !!!!!!!! analysis_inc:  work_a !!!!!!!!!!!!!!!!
-             work_a(:,:,k)=work_a(:,:,k)-worka2(:,:)
-             call fv3_ll_to_h(work_a(1,1,k),workb2,nlon,nlat,nlon_regional,nlat_regional,grid_reverse_flag)
+             work_a(:,:,k+mystart(3)-1)=work_a(:,:,k+mystart(3)-1)-worka2(:,:)
+             call fv3_ll_to_h(work_a(1,1,k+mystart(3)-1),workb2,nlon,nlat,nlon_regional,nlat_regional,grid_reverse_flag)
              work_b(:,:,k)=work_b(:,:,k)+workb2(:,:)
           enddo
           deallocate(worka2,workb2)
        else
-          do k=1,nsig
-             call fv3_ll_to_h(work_a(1,1,k),work_b(1,1,k),nlon,nlat,nlon_regional,nlat_regional,grid_reverse_flag)
+          do k=1,zcount
+             call fv3_ll_to_h(work_a(1,1,k+mystart(3)-1),work_b(1,1,k),nlon,nlat,nlon_regional,nlat_regional,grid_reverse_flag)
           enddo
        endif
 
-       print *,'write out ',trim(varname),' to ',trim(filename)
-       call check( nf90_put_var(gfile_loc,VarId,work_b) )
+       if(mywrtpe==0) print *,'write out ',trim(varname),' to ',trim(filename)
+       if (npePgrp_rfv3==1) then
+         call check( nf90_put_var(gfile_loc,VarId,work_b) )
+       elseif (npePgrp_rfv3>=2) then
+         call check( nf90_put_var(gfile_loc,VarId,work_b,start=mystart,count=mycount) )
+       end if
        call check( nf90_close(gfile_loc) )
        deallocate(work_b,work_a)
+       call MPI_Group_free(wrt_group,ierror);
+       call MPI_Comm_free(mpi_comm_wrt);
     end if !mype_io
 
+    call MPI_Group_free(world_group,ierror);
     deallocate(work,work_sub)
 
 end subroutine gsi_fv3ncdf_write
@@ -2379,15 +2543,16 @@ subroutine gsi_fv3ncdf_write_fv3_dz(filename,varname,varinc,mype_io,add_saved)
 !
 !$$$ end documentation block
 
-    use mpimod, only: mpi_rtype,mpi_comm_world,ierror,npe,mype
+    use mpimod, only: mpi_rtype,mpi_comm_world,ierror,npe,mype,MPI_INFO_NULL
     use gridmod, only: lat2,lon2,nlon,nlat,lat1,lon1,nsig
     use gridmod, only: ijn,displs_g,itotsub,iglobal
+    use gridmod, only: npePgrp_rfv3
     use mod_fv3_lola, only: fv3_ll_to_h
     use mod_fv3_lola, only: fv3_h_to_ll
     use general_commvars_mod, only: ltosi,ltosj
     use netcdf, only: nf90_open,nf90_close
-    use netcdf, only: nf90_write,nf90_inq_varid
-    use netcdf, only: nf90_put_var,nf90_get_var
+    use netcdf, only: nf90_write,nf90_inq_varid,nf90_var_par_access
+    use netcdf, only: nf90_put_var,nf90_get_var,nf90_collective
     implicit none
 
     real(r_kind)   ,intent(in   ) :: varinc(lat2,lon2,nsig)
@@ -2395,14 +2560,37 @@ subroutine gsi_fv3ncdf_write_fv3_dz(filename,varname,varinc,mype_io,add_saved)
     logical        ,intent(in   ) :: add_saved
     character(*)   ,intent(in   ) :: varname,filename
 
+    integer(i_kind) :: mywrtpe, stride, zcount
+    integer(i_kind) :: mystart(3), mycount(3)
+    integer(i_kind) :: mpi_comm_wrt, world_group, wrt_group
     integer(i_kind) :: VarId,gfile_loc
     integer(i_kind) i,j,mm1,k,kr,ns,n,m
     real(r_kind),allocatable,dimension(:):: work
     real(r_kind),allocatable,dimension(:,:,:):: work_sub,work_ainc
     real(r_kind),allocatable,dimension(:,:,:):: work_b
     real(r_kind),allocatable,dimension(:,:):: workb2
+    integer(i_kind),allocatable,dimension(:)::wrt_pe
+    logical :: is_wrtpe
 
+    if(mype==0) print *, 'working on dz'
     mm1=mype+1
+    is_wrtpe=.false.
+
+    !create  mpi_comm_wrt
+    allocate(wrt_pe(npePgrp_rfv3))
+    do i=1,npePgrp_rfv3
+       wrt_pe(i)=mype_io+i-1
+    enddo
+    call MPI_COMM_GROUP(MPI_COMM_WORLD, world_group, ierror)
+    if (any(wrt_pe==mype)) then
+      call MPI_GROUP_INCL(world_group, npePgrp_rfv3, wrt_pe, wrt_group, ierror)
+      call MPI_COMM_CREATE_GROUP(MPI_COMM_WORLD, wrt_group, 0, mpi_comm_wrt, ierror)
+      is_wrtpe=.true.
+    endif
+    mywrtpe=-1
+    if (is_wrtpe) then
+      call MPI_Comm_rank(mpi_comm_wrt, mywrtpe, ierror);
+    endif
 
     allocate(    work(max(iglobal,itotsub)*nsig),work_sub(lat1,lon1,nsig))
 !!!!!!!! reverse z !!!!!!!!!!!!!!
@@ -2414,10 +2602,19 @@ subroutine gsi_fv3ncdf_write_fv3_dz(filename,varname,varinc,mype_io,add_saved)
           end do
        end do
     enddo
-    call mpi_gatherv(work_sub,ijnz(mm1),mpi_rtype, &
-         work,ijnz,displsz_g,mpi_rtype,mype_io,mpi_comm_world,ierror)
 
-    if(mype==mype_io) then
+    do i=1,npePgrp_rfv3
+       call mpi_gatherv(work_sub,ijnz(mm1),mpi_rtype, &
+         work,ijnz,displsz_g,mpi_rtype,wrt_pe(i),mpi_comm_world,ierror)
+    enddo
+
+    if(is_wrtpe) then
+       stride=NINT(nsig*1.0/npePgrp_rfv3)
+       mystart=(/1,1,mywrtpe*stride+1/) !pe starts at 0
+       zcount=stride
+       if (mywrtpe==npePgrp_rfv3-1) zcount=nsig-mywrtpe*stride
+       mycount=(/nlon_regional, nlat_regional, zcount/)
+
        allocate( work_ainc(nlat,nlon,nsig))
        ns=0
        do m=1,npe
@@ -2429,31 +2626,48 @@ subroutine gsi_fv3ncdf_write_fv3_dz(filename,varname,varinc,mype_io,add_saved)
           enddo
        enddo
 
-       allocate( work_b(nlon_regional,nlat_regional,nsig))
+       allocate( work_b(nlon_regional,nlat_regional,zcount))
 
-       call check( nf90_open(trim(filename),nf90_write,gfile_loc) )
-       call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+       if (npePgrp_rfv3==1) then
+          call check( nf90_open(trim(filename),nf90_write,gfile_loc) )
+          call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+       elseif (npePgrp_rfv3>=2) then
+          call check( nf90_open(trim(filename),nf90_write,gfile_loc,comm=mpi_comm_wrt,info=MPI_INFO_NULL) )
+          call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+          call check(nf90_var_par_access(gfile_loc,VarId,nf90_collective))! Unlimited dimensions require collective writes
+       end if
 
        if(.not. add_saved)then
           write(6,*)'here the input is increments to be added to the read-in background, &
                      hence, add_saved has to be true'
        endif
        allocate( workb2(nlon_regional,nlat_regional))
-       call check( nf90_get_var(gfile_loc,VarId,work_b) )
+       if (npePgrp_rfv3==1) then
+          call check( nf90_get_var(gfile_loc,VarId,work_b) )
+       elseif (npePgrp_rfv3>=2) then
+          call check( nf90_get_var(gfile_loc,VarId,work_b,start=mystart,count=mycount) )
+       end if
 
-       do k=1,nsig
-          call fv3_ll_to_h(work_ainc(1,1,k),workb2(:,:),nlon,nlat,nlon_regional,nlat_regional,.true.)
+       do k=1,zcount
+          call fv3_ll_to_h(work_ainc(1,1,k+mystart(3)-1),workb2(:,:),nlon,nlat,nlon_regional,nlat_regional,.true.)
 !!!!!!!! analysis_inc:  work_a !!!!!!!!!!!!!!!!
           work_b(:,:,k)=workb2(:,:)+work_b(:,:,k)
        enddo
        deallocate(workb2)
 
-       print *,'write out ',trim(varname),' to ',trim(filename)
-       call check( nf90_put_var(gfile_loc,VarId,work_b) )
+       if (mywrtpe==0) print *,'write out ',trim(varname),' to ',trim(filename)
+       if (npePgrp_rfv3==1) then
+          call check( nf90_put_var(gfile_loc,VarId,work_b) )
+       elseif (npePgrp_rfv3>=2) then
+          call check( nf90_put_var(gfile_loc,VarId,work_b,start=mystart,count=mycount) )
+       end if
        call check( nf90_close(gfile_loc) )
        deallocate(work_b,work_ainc)
-    end if !mype_io
+       call MPI_Group_free(wrt_group,ierror);
+       call MPI_Comm_free(mpi_comm_wrt);
+    end if !is_wrtpe
 
+    call MPI_Group_free(world_group,ierror);
     deallocate(work,work_sub)
 
 end subroutine gsi_fv3ncdf_write_fv3_dz
