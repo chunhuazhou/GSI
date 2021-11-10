@@ -10,8 +10,7 @@
 #    (for global: cmake -DCOMGSI=ON -DENKF_MODE=GFS path_to_GSI)
 #    make -j8
 #
-
-dir_root=$(pwd)
+dir_root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
 
 ################# Hera ####################
 if [[ "`grep -i "hera" /etc/hosts | head -n1`" != "" ]] ; then
@@ -231,19 +230,34 @@ git status >> output.log
 echo -e "\nCompiling commands:" >> output.log
 
 BUILD_KJET=OFF
-if [[ ! -z $1 ]]; then
-  case $1 in
+ENKF_TYPE=WRF
+opts[0]=$1
+opts[1]=$2
+for opt in ${opts[@]}; do
+  case $opt in
     kjet|kJet|KJET|Kjet|kJET)
       BUILD_KJET=ON
       ;;
+    FV3ENKF|fv3enkf|FV3enkf|FV3reg|fv3reg|fv3reg_enkf)
+      ENKF_TYPE=FV3reg
+      ;;
   esac
+done
+
+if [ ${ENKF_TYPE} == "FV3reg" ]; then
+  echo "  cmake -DCOMGSI=ON -DENKF_MODE=FV3reg  -DBUILD_UTIL_COM=ON .." >> output.log
+else
+  echo "  cmake -DCOMGSI=ON -DENKF_MODE=WRF -DBUILD_GSDCLOUD_ARW=ON -DBUILD_ENKF_PREPROCESS_ARW=ON -DBUILD_UTIL_COM=ON .." >> output.log
 fi
-echo "  cmake -DCOMGSI=ON -DENKF_MODE=WRF -DBUILD_GSDCLOUD_ARW=ON -DBUILD_ENKF_PREPROCESS_ARW=ON -DBUILD_UTIL_COM=ON .." >> output.log
 echo "  -DBUILD_KJET=${BUILD_KJET}" >> output.log
 echo "  make -j8" >> output.log
 cat output.log
 
-cmake -DCOMGSI=ON -DENKF_MODE=WRF -DBUILD_GSDCLOUD_ARW=ON -DBUILD_ENKF_PREPROCESS_ARW=ON -DBUILD_UTIL_COM=ON -DBUILD_KJET=${BUILD_KJET} ..  2>&1  | tee output.cmake
+if [ ${ENKF_TYPE} == "FV3reg" ]; then
+  cmake -DCOMGSI=ON -DENKF_MODE=FV3reg -DBUILD_UTIL_COM=ON -DBUILD_KJET=${BUILD_KJET} ..  2>&1  | tee output.cmake
+else
+  cmake -DCOMGSI=ON -DENKF_MODE=WRF -DBUILD_GSDCLOUD_ARW=ON -DBUILD_ENKF_PREPROCESS_ARW=ON -DBUILD_UTIL_COM=ON -DBUILD_KJET=${BUILD_KJET} ..  2>&1  | tee output.cmake
+fi
 make -j 8 2>&1 | tee output.compile
 
 ###aftermath
@@ -253,8 +267,12 @@ repoName=${repoName//\//:}
 datestamp=`date +%Y%m%d`
 cd bin
 ln -sf gsi.x gsi.x_${repoName}_${datestamp}_${commitID}
-ln -sf enkf_wrf.x enkf_wrf.x_${repoName}_${datestamp}_${commitID}
-ln -sf enspreproc.x enspreproc.x_${repoName}_${datestamp}_${commitID}
+if [ ${ENKF_TYPE} == "FV3reg" ]; then
+  ln -sf enkf_fv3reg.x enkf_fv3reg.x_${repoName}_${datestamp}_${commitID}
+else
+  ln -sf enkf_wrf.x enkf_wrf.x_${repoName}_${datestamp}_${commitID}
+  ln -sf enspreproc.x enspreproc.x_${repoName}_${datestamp}_${commitID}
+fi
 ###mv $dir_root/build $dir_root/build_$commitID
 
 echo -e "\n\nAll build results are at ./build/ \n\n"
