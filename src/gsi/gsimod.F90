@@ -35,6 +35,7 @@
   use obsmod, only: luse_obsdiag
   use obsmod, only: netcdf_diag, binary_diag
   use obsmod, only: l_wcp_cwm
+  use obsmod, only: l_obsprvdiag
   use obsmod, only: aircraft_recon, &
        
        ! The following variables are the coefficients that describe
@@ -457,6 +458,9 @@
 !                       reflectivity ghost in analysis. (default is 0)
 ! 2021-09-08  Guoqing - Add npePgrp_rfv3,rfv3_pe_T,rfv3_pe_v,rfv3_pe_q,rfv3_pe_ps,rfv3_pe_dz
 !                         To speed up writing out regional FV3 final analysis.
+!  2021-11-16 Zhao    - add option l_obsprvdiag (if true) to trigger the output of
+!                       observation provider and sub-provider information into
+!                       obsdiags files (used for AutoObsQC)
 !
 !EOP
 !-------------------------------------------------------------------------
@@ -668,6 +672,9 @@
 !     npePgrp_rfv3 - The number of PEs in each write group for regional fv3
 !     rfv3_pe_T,rfv3_pe_v,rfv3_pe_q,rfv3_pe_ps,rfv3_pe_dz - specify starting pe for T,U/V,Q,PS,DZ write groups 
 !
+!     l_obsprvdiag - trigger (if true) writing out observation provider and sub-provider
+!                    information into obsdiags files (used for AutoObsQC)
+!
 !     NOTE:  for now, if in regional mode, then iguess=-1 is forced internally.
 !            add use of guess file later for regional mode.
 
@@ -712,7 +719,7 @@
        write_fv3_incr,incvars_to_zero,incvars_zero_strat,incvars_efold,diag_version,&
        cao_check,lcalc_gfdl_cfrac,tau_fcst,efsoi_order,lupdqc,lqcoef,cnvw_option,l2rwthin,hurricane_radar,&
        npePgrp_rfv3,rfv3_pe_T,rfv3_pe_v,rfv3_pe_q,rfv3_pe_ps,rfv3_pe_dz, &
-       l_reg_update_hydro_delz
+       l_reg_update_hydro_delz, l_obsprvdiag
 
 ! GRIDOPTS (grid setup variables,including regional specific variables):
 !     jcap     - spectral resolution
