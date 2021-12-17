@@ -92,7 +92,6 @@ module gridmod
 !   2019-09-04  martin  - add write_fv3_incr to write netCDF increment rather than analysis in NEMSIO format
 !   2019-09-23  martin  - add use_gfs_ncio to read global first guess from netCDF file
 !   2020-12-18  Hu      - add grid_type_fv3_regional
-!   2021-09-08  Guoqing - add npePgrp_rfv3,rfv3_pe_T,rfv3_pe_v,rfv3_pe_q,rfv3_pe_ps,rfv3_pe_dz
 !
 !                        
 !
@@ -163,7 +162,6 @@ module gridmod
   public :: use_sp_eqspace,jcap_cut
   public :: wrf_mass_hybridcord
   public :: write_fv3_incr
-  public :: npePgrp_rfv3,rfv3_pe_T,rfv3_pe_v,rfv3_pe_q,rfv3_pe_ps,rfv3_pe_dz
 
   interface strip
      module procedure strip_single_rank33_
@@ -266,9 +264,7 @@ module gridmod
   integer(i_kind) jcap              ! spectral triangular truncation of ncep global analysis
   integer(i_kind) jcap_b            ! spectral triangular truncation of ncep global background
   integer(i_kind) nthreads          ! number of threads used (currently only used in calctends routines)
-  integer(i_kind) npePgrp_rfv3,rfv3_pe_T,rfv3_pe_v,rfv3_pe_q,rfv3_pe_ps,rfv3_pe_dz
-!     npePgrp_rfv3 - The number of PEs in each write group for regional fv3
-!     rfv3_pe_T,rfv3_pe_v,rfv3_pe_q,rfv3_pe_ps,rfv3_pe_dz - specify starting pe for T,U/V,Q,PS,DZ write groups
+
 
   logical periodic                              ! logical flag for periodic e/w domains
   logical,allocatable,dimension(:):: periodic_s ! logical flag for periodic e/w subdomain (all tasks)
@@ -476,12 +472,6 @@ contains
     lon1 = nlon
     lat2 = lat1+2
     lon2 = lon1+2
-    npePgrp_rfv3=2
-    rfv3_pe_T=0
-    rfv3_pe_v=2
-    rfv3_pe_q=4
-    rfv3_pe_ps=6
-    rfv3_pe_dz=8
 
     diagnostic_reg = .false.
     if(verbose)diagnostic_reg = .true.
