@@ -74,6 +74,7 @@ module gsi_rfv3io_mod
   type(sub2grid_info) :: grd_fv3lam_tracer_ionouv 
   type(sub2grid_info) :: grd_fv3lam_uv 
   integer(i_kind) ,parameter:: ndynvarslist=13, ntracerslist=8
+  integer(i_kind) ,parameter:: fv3_io_layout_y=10
   character(len=max_varname_length), parameter :: vardynvars(ndynvarslist) =(/"u","v","u_w","u_s", &
                                 "v_w","v_s","t","tv","tsen","w","delp","ps","delzinc"/) 
   character(len=max_varname_length), parameter :: vartracers(ntracerslist) =(/'q','oz', &
@@ -1041,7 +1042,6 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
 
       end if
 
-
 end subroutine read_fv3_netcdf_guess
 
 subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
@@ -1094,6 +1094,12 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
       character(len=:),allocatable :: sfcdata   !='fv3_sfcdata'
       character(len=:),allocatable :: dynvars   !='fv3_dynvars'
 
+! for io_layout > 1
+    real(r_kind),allocatable,dimension(:,:):: sfc_fulldomain
+    integer(i_kind) nycase_layout,nio
+    integer(i_kind),allocatable :: gfile_loc_layout(:)
+    character(len=180)  :: filename_layout
+
     sfcdata= fv3filenamegin%sfcdata
     dynvars= fv3filenamegin%dynvars
 
@@ -1103,11 +1109,30 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
     allocate( sfcn2d(lat2,lon2,n2d))
 
     if(mype==mype_2d ) then
-       iret=nf90_open(sfcdata,nf90_nowrite,gfile_loc)
-       if(iret/=nf90_noerr) then
-          write(6,*)' problem opening3 ',trim(sfcdata),', Status = ',iret
-          return
+       allocate(sfc_fulldomain(nx,ny))
+
+       if(fv3_io_layout_y > 1) then
+         nycase_layout=int(ny/fv3_io_layout_y)
+         if(ny > nycase_layout*fv3_io_layout_y) nycase_layout=nycase_layout+1
+         allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
+         do nio=0,fv3_io_layout_y-1
+           write(filename_layout,'(a,a,I4.4)') trim(sfcdata),'.',nio
+           write(*,*) 'check layout=',mm1,trim(filename_layout)
+           iret=nf90_open(filename_layout,nf90_nowrite,gfile_loc_layout(nio))
+           if(iret/=nf90_noerr) then
+             write(6,*)' problem opening3 ',trim(filename_layout),', Status = ',iret
+             return
+           endif
+         enddo
+         gfile_loc=gfile_loc_layout(0)
+       else
+         iret=nf90_open(sfcdata,nf90_nowrite,gfile_loc)
+         if(iret/=nf90_noerr) then
+            write(6,*)' problem opening3 ',trim(sfcdata),', Status = ',iret
+            return
+         endif
        endif
+
        iret=nf90_inquire(gfile_loc,ndimensions,nvariables,nattributes,unlimiteddimid)
        allocate(dim(ndimensions))
        do k=1,ndimensions
@@ -1147,16 +1172,33 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
           if(allocated(sfc       )) deallocate(sfc       )
           if(ndim >=3) then  !the block of 10 lines is compied from GSL gsi.
              allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
-             iret=nf90_get_var(gfile_loc,i,sfc)
+             if(fv3_io_layout_y > 1) then
+                do nio=0,fv3_io_layout_y-1
+                  iret=nf90_get_var(gfile_loc_layout(nio),i,sfc)
+                  sfc_fulldomain(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=sfc(:,:,1)
+                enddo
+             else
+                iret=nf90_get_var(gfile_loc,i,sfc)
+                sfc_fulldomain(:,:)=sfc(:,:,1)
+             endif
           else if (ndim == 2) then
              allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),1))
-             iret=nf90_get_var(gfile_loc,i,sfc(:,:,1))
+             if(fv3_io_layout_y > 1) then
+                do nio=0,fv3_io_layout_y-1
+                  iret=nf90_get_var(gfile_loc_layout(nio),i,sfc(:,:,1))
+                  sfc_fulldomain(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=sfc(:,:,1)
+                enddo
+             else
+                iret=nf90_get_var(gfile_loc,i,sfc(:,:,1))
+                sfc_fulldomain(:,:)=sfc(:,:,1)
+             endif
           else
              write(*,*) "wrong dimension number ndim =",ndim
              call stop2(119)
           endif
-
-          call fv3_h_to_ll(sfc(:,:,1),a,nx,ny,nxa,nya,grid_reverse_flag)
+          write(*,*) 'i sfc_fulldomain=',i, maxval(sfc_fulldomain),minval(sfc_fulldomain)
+          write(*,*) i,sfc_fulldomain(10,:)
+          call fv3_h_to_ll(sfc_fulldomain,a,nx,ny,nxa,nya,grid_reverse_flag)
 
           kk=0
           do n=1,npe
@@ -1170,13 +1212,34 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
              end do
           end do
        enddo ! i
-       iret=nf90_close(gfile_loc)
+       if(fv3_io_layout_y > 1) then
+         do nio=0,fv3_io_layout_y-1
+           iret=nf90_close(gfile_loc_layout(nio))
+         enddo
+           deallocate (gfile_loc_layout)
+       else
+         iret=nf90_close(gfile_loc)
+       endif
 
    !!!! read in orog from dynam !!!!!!!!!!!!
-       iret=nf90_open(dynvars,nf90_nowrite,gfile_loc)
-       if(iret/=nf90_noerr) then
-          write(6,*)' problem opening4 ',trim(dynvars ),gfile_loc,', Status = ',iret
-          return
+       if(fv3_io_layout_y > 1) then
+         allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
+         do nio=0,fv3_io_layout_y-1
+           write(filename_layout,'(a,a,I4.4)') trim(dynvars),'.',nio
+           write(*,*) 'check layout=',mm1,trim(filename_layout)
+           iret=nf90_open(filename_layout,nf90_nowrite,gfile_loc_layout(nio))
+           if(iret/=nf90_noerr) then
+             write(6,*)' problem opening4 ',trim(filename_layout),', Status =',iret
+             return
+           endif
+         enddo
+         gfile_loc=gfile_loc_layout(0)
+       else
+         iret=nf90_open(dynvars,nf90_nowrite,gfile_loc)
+         if(iret/=nf90_noerr) then
+            write(6,*)' problem opening4 ',trim(dynvars ),gfile_loc,', Status = ',iret
+            return
+         endif
        endif
 
        iret=nf90_inquire(gfile_loc,ndimensions,nvariables,nattributes,unlimiteddimid)
@@ -1197,14 +1260,30 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
              allocate(dim_id(ndim))
              iret=nf90_inquire_variable(gfile_loc,k,dimids=dim_id)
              allocate(sfc1(dim(dim_id(1)),dim(dim_id(2))) )
-             iret=nf90_get_var(gfile_loc,k,sfc1)
+             if(fv3_io_layout_y > 1) then
+                do nio=0,fv3_io_layout_y-1
+                  iret=nf90_get_var(gfile_loc_layout(nio),k,sfc1)
+                  sfc_fulldomain(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=sfc1
+                enddo
+             else
+                iret=nf90_get_var(gfile_loc,k,sfc1)
+                sfc_fulldomain=sfc1
+             endif
              exit
           endif
        enddo     !   k
-       iret=nf90_close(gfile_loc)
+       if(fv3_io_layout_y > 1) then
+         do nio=0,fv3_io_layout_y-1
+           iret=nf90_close(gfile_loc_layout(nio))
+         enddo
+         deallocate(gfile_loc_layout)
+       else
+         iret=nf90_close(gfile_loc)
+       endif
 
        k=k_orog
-       call fv3_h_to_ll(sfc1,a,nx,ny,nxa,nya,grid_reverse_flag)
+       write(*,*) 'phis sfc_fulldomain=',maxval(sfc_fulldomain),minval(sfc_fulldomain)
+       call fv3_h_to_ll(sfc_fulldomain,a,nx,ny,nxa,nya,grid_reverse_flag)
 
        kk=0
        do n=1,npe
@@ -1219,6 +1298,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
        end do
 
        deallocate (dim_id,sfc,sfc1,dim)
+       deallocate (sfc_fulldomain)
     endif  ! mype
 
 
@@ -1396,6 +1476,11 @@ subroutine gsi_fv3ncdf_read(grd_ionouv,cstate_nouv,filenamein,fv3filenamegin)
     integer(i_kind) kbgn,kend
     integer(i_kind) gfile_loc,iret,var_id
     integer(i_kind) nz,nzp1,mm1
+! for io_layout > 1
+    real(r_kind),allocatable,dimension(:,:):: uu2d_layout
+    integer(i_kind) nycase_layout,nio
+    integer(i_kind),allocatable :: gfile_loc_layout(:)
+    character(len=180)  :: filename_layout
 
     mm1=mype+1
     nloncase=grd_ionouv%nlon
@@ -1405,12 +1490,32 @@ subroutine gsi_fv3ncdf_read(grd_ionouv,cstate_nouv,filenamein,fv3filenamegin)
     kbgn=grd_ionouv%kbegin_loc
     kend=grd_ionouv%kend_loc
     allocate(uu2d(nxcase,nycase))
-    iret=nf90_open(filenamein,nf90_nowrite,gfile_loc,comm=mpi_comm_world,info=MPI_INFO_NULL) !clt
-    if(iret/=nf90_noerr) then
-      write(6,*)' gsi_fv3ncdf_read: problem opening ',trim(filenamein),gfile_loc,', Status = ',iret
-      call flush(6)
-      call stop2(333)
+
+    nycase_layout=nycase
+    if(fv3_io_layout_y > 1) then
+      nycase_layout=int(nycase/fv3_io_layout_y)
+      if(nycase > nycase_layout*fv3_io_layout_y) nycase_layout=nycase_layout+1
+      allocate(uu2d_layout(nxcase,nycase_layout))
+
+      allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
+      do nio=0,fv3_io_layout_y-1
+        write(filename_layout,'(a,a,I4.4)') trim(filenamein),'.',nio
+        iret=nf90_open(filename_layout,nf90_nowrite,gfile_loc_layout(nio),comm=mpi_comm_world,info=MPI_INFO_NULL) !clt
+        if(iret/=nf90_noerr) then
+          write(6,*)' gsi_fv3ncdf_read: problem opening ',trim(filename_layout),gfile_loc_layout(nio),', Status = ',iret
+          call flush(6)
+          call stop2(333)
+        endif
+      enddo
+    else
+      iret=nf90_open(filenamein,nf90_nowrite,gfile_loc,comm=mpi_comm_world,info=MPI_INFO_NULL) !clt
+      if(iret/=nf90_noerr) then
+        write(6,*)' gsi_fv3ncdf_read: problem opening ',trim(filenamein),gfile_loc,', Status = ',iret
+        call flush(6)
+        call stop2(333)
+      endif
     endif
+
     do ilevtot=kbgn,kend
       vgsiname=grd_ionouv%names(1,ilevtot)
       if(trim(vgsiname)=='delzinc') cycle  !delzinc is not read from DZ ,it's started from hydrostatic height 
@@ -1426,17 +1531,38 @@ subroutine gsi_fv3ncdf_read(grd_ionouv,cstate_nouv,filenamein,fv3filenamegin)
       nzp1=nz+1
       inative=nzp1-ilev
       startloc=(/1,1,inative/)
-      countloc=(/nxcase,nycase,1/)
+      countloc=(/nxcase,nycase_layout,1/)
 
-      iret=nf90_inq_varid(gfile_loc,trim(adjustl(varname)),var_id)
-      iret=nf90_get_var(gfile_loc,var_id,uu2d,start=startloc,count=countloc)
+      if(fv3_io_layout_y > 1) then
+        do nio=0,fv3_io_layout_y-1
+          iret=nf90_inq_varid(gfile_loc_layout(nio),trim(adjustl(varname)),var_id)
+          iret=nf90_get_var(gfile_loc_layout(nio),var_id,uu2d_layout,start=startloc,count=countloc)
+          uu2d(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=uu2d_layout
+        enddo
+      else
+        iret=nf90_inq_varid(gfile_loc,trim(adjustl(varname)),var_id)
+        iret=nf90_get_var(gfile_loc,var_id,uu2d,start=startloc,count=countloc)
+      endif
+
+      write(*,*) '3D=',mm1,ilevtot,maxval(uu2d),minval(uu2d)
+      if(mm1==2) then
+        write(*,*) trim(adjustl(varname)),uu2d(10,:)
+      endif
       call fv3_h_to_ll(uu2d,hwork(1,:,:,ilevtot),nxcase,nycase,nloncase,nlatcase,grid_reverse_flag)
     enddo  ! ilevtot
-    call general_grid2sub(grd_ionouv,hwork,cstate_nouv%values)
-    iret=nf90_close(gfile_loc)
-    deallocate (uu2d)
 
-    
+    if(fv3_io_layout_y > 1) then
+      deallocate(uu2d_layout)
+      do nio=1,fv3_io_layout_y-1
+        iret=nf90_close(gfile_loc_layout(nio))
+      enddo
+      deallocate(gfile_loc_layout)
+    else
+      iret=nf90_close(gfile_loc)
+    endif
+
+    deallocate (uu2d)
+    call general_grid2sub(grd_ionouv,hwork,cstate_nouv%values)
     
     return
 end subroutine gsi_fv3ncdf_read
@@ -1513,7 +1639,6 @@ subroutine gsi_fv3ncdf_read_v1(grd_ionouv,cstate_nouv,filenamein,fv3filenamegin)
        call flush(6)
        call stop2(333)
     endif
-
 
     do ilevtot=kbgn,kend
       vgsiname=grd_ionouv%names(1,ilevtot)
@@ -1601,6 +1726,12 @@ subroutine gsi_fv3ncdf_readuv(grd_uv,ges_u,ges_v,fv3filenamegin)
     integer(i_kind) gfile_loc,iret
     integer(i_kind) nz,nzp1,mm1
 
+! for fv3_io_layout_y > 1
+    real(r_kind),allocatable,dimension(:,:):: u2d_layout,v2d_layout
+    integer(i_kind) nycase_layout,nio
+    integer(i_kind),allocatable :: gfile_loc_layout(:)
+    character(len=180)  :: filename_layout
+
     mm1=mype+1
     nloncase=grd_uv%nlon
     nlatcase=grd_uv%nlat
@@ -1614,10 +1745,33 @@ subroutine gsi_fv3ncdf_readuv(grd_uv,ges_u,ges_v,fv3filenamegin)
     allocate(vc2d(nxcase,nycase))
     allocate (worksub(2,grd_uv%lat2,grd_uv%lon2,grd_uv%nsig))
     filenamein=fv3filenamegin%dynvars
-    iret=nf90_open(filenamein,nf90_nowrite,gfile_loc,comm=mpi_comm_world,info=MPI_INFO_NULL) !clt
-    if(iret/=nf90_noerr) then
-      write(6,*)' problem opening6 ',trim(filenamein),', Status = ',iret
+
+    nycase_layout=nycase
+    if(fv3_io_layout_y > 1) then
+      nycase_layout=int(nycase/fv3_io_layout_y)
+      if(nycase > nycase_layout*fv3_io_layout_y) nycase_layout=nycase_layout+1
+      allocate(u2d_layout(nxcase,nycase_layout+1))
+      allocate(v2d_layout(nxcase+1,nycase_layout))
+
+      allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
+      do nio=0,fv3_io_layout_y-1
+        write(filename_layout,'(a,a,I4.4)') trim(filenamein),".",nio
+        iret=nf90_open(filename_layout,nf90_nowrite,gfile_loc_layout(nio),comm=mpi_comm_world,info=MPI_INFO_NULL)
+        if(iret/=nf90_noerr) then
+          write(6,*)'problem opening ',trim(filename_layout),gfile_loc_layout(nio),', Status = ',iret
+          call flush(6)
+          call stop2(333)
+        endif
+      enddo
+    else
+      iret=nf90_open(filenamein,nf90_nowrite,gfile_loc,comm=mpi_comm_world,info=MPI_INFO_NULL) !clt
+      if(iret/=nf90_noerr) then
+        write(6,*)' problem opening6 ',trim(filenamein),', Status = ',iret
+        call flush(6)
+        call stop2(333)
+      endif
     endif
+
     do ilevtot=kbgn,kend
       vgsiname=grd_uv%names(1,ilevtot)
       call getfv3lamfilevname(vgsiname,fv3filenamegin,filenamein2,varname)
@@ -1630,18 +1784,37 @@ subroutine gsi_fv3ncdf_readuv(grd_uv,ges_u,ges_v,fv3filenamegin)
       nz=grd_uv%nsig
       nzp1=nz+1
       inative=nzp1-ilev
-      u_countloc=(/nxcase,nycase+1,1/)
-      v_countloc=(/nxcase+1,nycase,1/)
+      u_countloc=(/nxcase,nycase_layout+1,1/)
+      v_countloc=(/nxcase+1,nycase_layout,1/)
       u_startloc=(/1,1,inative/)
       v_startloc=(/1,1,inative/)
 
-      call check( nf90_inq_varid(gfile_loc,'u',u_grd_VarId) ) 
-      iret=nf90_get_var(gfile_loc,u_grd_VarId,u2d,start=u_startloc,count=u_countloc)
-      call check( nf90_inq_varid(gfile_loc,'v',v_grd_VarId) ) 
-      iret=nf90_get_var(gfile_loc,v_grd_VarId,v2d,start=v_startloc,count=v_countloc)
+      if(fv3_io_layout_y > 1) then
+        do nio=0,fv3_io_layout_y-1
+          call check( nf90_inq_varid(gfile_loc_layout(nio),'u',u_grd_VarId) ) 
+          iret=nf90_get_var(gfile_loc_layout(nio),u_grd_VarId,u2d_layout,start=u_startloc,count=u_countloc)
+          u2d(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=u2d_layout(:,1:nycase_layout)
+          if(nio==fv3_io_layout_y-1) u2d(:,(nio+1)*nycase_layout+1)=u2d_layout(:,nycase_layout+1) 
+          call check( nf90_inq_varid(gfile_loc_layout(nio),'v',v_grd_VarId) ) 
+          iret=nf90_get_var(gfile_loc_layout(nio),v_grd_VarId,v2d_layout,start=v_startloc,count=v_countloc)
+          v2d(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=v2d_layout
+        enddo
+      else
+        call check( nf90_inq_varid(gfile_loc,'u',u_grd_VarId) ) 
+        iret=nf90_get_var(gfile_loc,u_grd_VarId,u2d,start=u_startloc,count=u_countloc)
+        call check( nf90_inq_varid(gfile_loc,'v',v_grd_VarId) ) 
+        iret=nf90_get_var(gfile_loc,v_grd_VarId,v2d,start=v_startloc,count=v_countloc)
+      endif
+
       if(.not.grid_reverse_flag) then 
         call reverse_grid_r_uv (u2d,nxcase,nycase+1,1)
         call reverse_grid_r_uv (v2d,nxcase+1,nycase,1)
+      endif
+      write(*,*) '3D u=',mm1,ilevtot,maxval(u2d),minval(u2d)
+      write(*,*) '3D v=',mm1,ilevtot,maxval(v2d),minval(v2d)
+      if(mm1==2) then
+        write(*,*) u2d(10,:)
+        write(*,*) v2d(10,:)
       endif
       call fv3uv2earth(u2d(:,:),v2d(:,:),nxcase,nycase,uc2d,vc2d)
 
@@ -1665,12 +1838,23 @@ subroutine gsi_fv3ncdf_readuv(grd_uv,ges_u,ges_v,fv3filenamegin)
       call fv3_h_to_ll(vc2d,hwork(2,:,:,ilevtot),nxcase,nycase,nloncase,nlatcase,.true.)
     enddo ! i
 
+    if(fv3_io_layout_y > 1) then
+      deallocate(u2d_layout)
+      deallocate(v2d_layout)
+      do nio=0,fv3_io_layout_y-1
+        iret=nf90_close(gfile_loc_layout(nio))
+      enddo
+      deallocate(gfile_loc_layout)
+    else
+      iret=nf90_close(gfile_loc)
+    endif
+    deallocate(u2d,v2d,uc2d,vc2d)
+
     call general_grid2sub(grd_uv,hwork,worksub) 
     ges_u=worksub(1,:,:,:)
     ges_v=worksub(2,:,:,:)
-    iret=nf90_close(gfile_loc)
+    deallocate(worksub)
 
-    deallocate(u2d,v2d,uc2d,vc2d,worksub)
 end subroutine gsi_fv3ncdf_readuv
 subroutine gsi_fv3ncdf_readuv_v1(grd_uv,ges_u,ges_v,fv3filenamegin)
 !$$$  subprogram documentation block
@@ -1764,15 +1948,16 @@ subroutine gsi_fv3ncdf_readuv_v1(grd_uv,ges_u,ges_v,fv3filenamegin)
 
 ! transfor to earth u/v, interpolate to analysis grid, reverse vertical order
       iret=nf90_inq_varid(gfile_loc,trim(adjustl("u_s")),var_id)
-      
       iret=nf90_get_var(gfile_loc,var_id,us2d,start=us_startloc,count=us_countloc)
+
       iret=nf90_inq_varid(gfile_loc,trim(adjustl("v_w")),var_id)
       iret=nf90_get_var(gfile_loc,var_id,vw2d,start=vw_startloc,count=vw_countloc)
+
       do j=1,ny
         uorv2d(:,j)=half*(us2d(:,j)+us2d(:,j+1))
       enddo
-          
       call fv3_h_to_ll(uorv2d(:,:),hwork(1,:,:,ilevtot),nxcase,nycase,nloncase,nlatcase,grid_reverse_flag)
+
       do j=1,nx
         uorv2d(j,:)=half*(vw2d(j,:)+vw2d(j+1,:))
       enddo
