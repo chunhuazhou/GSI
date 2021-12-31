@@ -41,6 +41,7 @@ module gsi_rfv3io_mod
   use constants, only:max_varname_length
   use gsi_bundlemod, only : gsi_bundle
   use general_sub2grid_mod, only: sub2grid_info
+  use gridmod,  only: fv3_io_layout_y
   implicit none
   public type_fv3regfilenameg
   public bg_fv3regfilenameg
@@ -62,6 +63,7 @@ module gsi_rfv3io_mod
   
   type(type_fv3regfilenameg):: bg_fv3regfilenameg
   integer(i_kind) nx,ny,nz
+  integer(i_kind) ny_layout
   real(r_kind),allocatable:: grid_lon(:,:),grid_lont(:,:),grid_lat(:,:),grid_latt(:,:)
   real(r_kind),allocatable:: ak(:),bk(:)
   integer(i_kind),allocatable:: ijns2d(:),displss2d(:),ijns(:),displss(:)
@@ -74,7 +76,6 @@ module gsi_rfv3io_mod
   type(sub2grid_info) :: grd_fv3lam_tracer_ionouv 
   type(sub2grid_info) :: grd_fv3lam_uv 
   integer(i_kind) ,parameter:: ndynvarslist=13, ntracerslist=8
-  integer(i_kind) ,parameter:: fv3_io_layout_y=10
   character(len=max_varname_length), parameter :: vardynvars(ndynvarslist) =(/"u","v","u_w","u_s", &
                                 "v_w","v_s","t","tv","tsen","w","delp","ps","delzinc"/) 
   character(len=max_varname_length), parameter :: vartracers(ntracerslist) =(/'q','oz', &
@@ -282,7 +283,12 @@ subroutine gsi_rfv3io_get_grid_specs(fv3filenamegin,ierr)
     enddo
     nlon_regional=nx
     nlat_regional=ny
-    if(mype==0)write(6,*),'nx,ny=',nx,ny
+    ny_layout=ny
+    if(fv3_io_layout_y > 1) then
+       ny_layout=int(ny/fv3_io_layout_y)
+       if(ny > ny_layout*fv3_io_layout_y) ny_layout=ny_layout+1
+    endif
+    if(mype==0)write(6,*),'nx,ny,ny_layout=',nx,ny,ny_layout
 
 !!!    get nx,ny,grid_lon,grid_lont,grid_lat,grid_latt,nz,ak,bk
 
@@ -1096,7 +1102,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
 
 ! for io_layout > 1
     real(r_kind),allocatable,dimension(:,:):: sfc_fulldomain
-    integer(i_kind) nycase_layout,nio
+    integer(i_kind) :: nio
     integer(i_kind),allocatable :: gfile_loc_layout(:)
     character(len=180)  :: filename_layout
 
@@ -1112,8 +1118,6 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
        allocate(sfc_fulldomain(nx,ny))
 
        if(fv3_io_layout_y > 1) then
-         nycase_layout=int(ny/fv3_io_layout_y)
-         if(ny > nycase_layout*fv3_io_layout_y) nycase_layout=nycase_layout+1
          allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
          do nio=0,fv3_io_layout_y-1
            write(filename_layout,'(a,a,I4.4)') trim(sfcdata),'.',nio
@@ -1175,7 +1179,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
              if(fv3_io_layout_y > 1) then
                 do nio=0,fv3_io_layout_y-1
                   iret=nf90_get_var(gfile_loc_layout(nio),i,sfc)
-                  sfc_fulldomain(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=sfc(:,:,1)
+                  sfc_fulldomain(:,nio*ny_layout+1:(nio+1)*ny_layout)=sfc(:,:,1)
                 enddo
              else
                 iret=nf90_get_var(gfile_loc,i,sfc)
@@ -1186,7 +1190,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
              if(fv3_io_layout_y > 1) then
                 do nio=0,fv3_io_layout_y-1
                   iret=nf90_get_var(gfile_loc_layout(nio),i,sfc(:,:,1))
-                  sfc_fulldomain(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=sfc(:,:,1)
+                  sfc_fulldomain(:,nio*ny_layout+1:(nio+1)*ny_layout)=sfc(:,:,1)
                 enddo
              else
                 iret=nf90_get_var(gfile_loc,i,sfc(:,:,1))
@@ -1263,7 +1267,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
              if(fv3_io_layout_y > 1) then
                 do nio=0,fv3_io_layout_y-1
                   iret=nf90_get_var(gfile_loc_layout(nio),k,sfc1)
-                  sfc_fulldomain(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=sfc1
+                  sfc_fulldomain(:,nio*ny_layout+1:(nio+1)*ny_layout)=sfc1
                 enddo
              else
                 iret=nf90_get_var(gfile_loc,k,sfc1)
@@ -1478,7 +1482,7 @@ subroutine gsi_fv3ncdf_read(grd_ionouv,cstate_nouv,filenamein,fv3filenamegin)
     integer(i_kind) nz,nzp1,mm1
 ! for io_layout > 1
     real(r_kind),allocatable,dimension(:,:):: uu2d_layout
-    integer(i_kind) nycase_layout,nio
+    integer(i_kind) :: nio
     integer(i_kind),allocatable :: gfile_loc_layout(:)
     character(len=180)  :: filename_layout
 
@@ -1491,11 +1495,8 @@ subroutine gsi_fv3ncdf_read(grd_ionouv,cstate_nouv,filenamein,fv3filenamegin)
     kend=grd_ionouv%kend_loc
     allocate(uu2d(nxcase,nycase))
 
-    nycase_layout=nycase
     if(fv3_io_layout_y > 1) then
-      nycase_layout=int(nycase/fv3_io_layout_y)
-      if(nycase > nycase_layout*fv3_io_layout_y) nycase_layout=nycase_layout+1
-      allocate(uu2d_layout(nxcase,nycase_layout))
+      allocate(uu2d_layout(nxcase,ny_layout))
 
       allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
       do nio=0,fv3_io_layout_y-1
@@ -1531,13 +1532,13 @@ subroutine gsi_fv3ncdf_read(grd_ionouv,cstate_nouv,filenamein,fv3filenamegin)
       nzp1=nz+1
       inative=nzp1-ilev
       startloc=(/1,1,inative/)
-      countloc=(/nxcase,nycase_layout,1/)
+      countloc=(/nxcase,ny_layout,1/)
 
       if(fv3_io_layout_y > 1) then
         do nio=0,fv3_io_layout_y-1
           iret=nf90_inq_varid(gfile_loc_layout(nio),trim(adjustl(varname)),var_id)
           iret=nf90_get_var(gfile_loc_layout(nio),var_id,uu2d_layout,start=startloc,count=countloc)
-          uu2d(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=uu2d_layout
+          uu2d(:,nio*ny_layout+1:(nio+1)*ny_layout)=uu2d_layout
         enddo
       else
         iret=nf90_inq_varid(gfile_loc,trim(adjustl(varname)),var_id)
@@ -1728,7 +1729,7 @@ subroutine gsi_fv3ncdf_readuv(grd_uv,ges_u,ges_v,fv3filenamegin)
 
 ! for fv3_io_layout_y > 1
     real(r_kind),allocatable,dimension(:,:):: u2d_layout,v2d_layout
-    integer(i_kind) nycase_layout,nio
+    integer(i_kind) :: nio
     integer(i_kind),allocatable :: gfile_loc_layout(:)
     character(len=180)  :: filename_layout
 
@@ -1746,12 +1747,9 @@ subroutine gsi_fv3ncdf_readuv(grd_uv,ges_u,ges_v,fv3filenamegin)
     allocate (worksub(2,grd_uv%lat2,grd_uv%lon2,grd_uv%nsig))
     filenamein=fv3filenamegin%dynvars
 
-    nycase_layout=nycase
     if(fv3_io_layout_y > 1) then
-      nycase_layout=int(nycase/fv3_io_layout_y)
-      if(nycase > nycase_layout*fv3_io_layout_y) nycase_layout=nycase_layout+1
-      allocate(u2d_layout(nxcase,nycase_layout+1))
-      allocate(v2d_layout(nxcase+1,nycase_layout))
+      allocate(u2d_layout(nxcase,ny_layout+1))
+      allocate(v2d_layout(nxcase+1,ny_layout))
 
       allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
       do nio=0,fv3_io_layout_y-1
@@ -1784,8 +1782,8 @@ subroutine gsi_fv3ncdf_readuv(grd_uv,ges_u,ges_v,fv3filenamegin)
       nz=grd_uv%nsig
       nzp1=nz+1
       inative=nzp1-ilev
-      u_countloc=(/nxcase,nycase_layout+1,1/)
-      v_countloc=(/nxcase+1,nycase_layout,1/)
+      u_countloc=(/nxcase,ny_layout+1,1/)
+      v_countloc=(/nxcase+1,ny_layout,1/)
       u_startloc=(/1,1,inative/)
       v_startloc=(/1,1,inative/)
 
@@ -1793,11 +1791,11 @@ subroutine gsi_fv3ncdf_readuv(grd_uv,ges_u,ges_v,fv3filenamegin)
         do nio=0,fv3_io_layout_y-1
           call check( nf90_inq_varid(gfile_loc_layout(nio),'u',u_grd_VarId) ) 
           iret=nf90_get_var(gfile_loc_layout(nio),u_grd_VarId,u2d_layout,start=u_startloc,count=u_countloc)
-          u2d(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=u2d_layout(:,1:nycase_layout)
-          if(nio==fv3_io_layout_y-1) u2d(:,(nio+1)*nycase_layout+1)=u2d_layout(:,nycase_layout+1) 
+          u2d(:,nio*ny_layout+1:(nio+1)*ny_layout)=u2d_layout(:,1:ny_layout)
+          if(nio==fv3_io_layout_y-1) u2d(:,(nio+1)*ny_layout+1)=u2d_layout(:,ny_layout+1) 
           call check( nf90_inq_varid(gfile_loc_layout(nio),'v',v_grd_VarId) ) 
           iret=nf90_get_var(gfile_loc_layout(nio),v_grd_VarId,v2d_layout,start=v_startloc,count=v_countloc)
-          v2d(:,nio*nycase_layout+1:(nio+1)*nycase_layout)=v2d_layout
+          v2d(:,nio*ny_layout+1:(nio+1)*ny_layout)=v2d_layout
         enddo
       else
         call check( nf90_inq_varid(gfile_loc,'u',u_grd_VarId) ) 
