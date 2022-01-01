@@ -2189,6 +2189,12 @@ subroutine gsi_fv3ncdf_writeuv(grd_uv,ges_u,ges_v,add_saved,fv3filenamegin)
     real(r_kind),allocatable,dimension(:,:):: u2d,v2d,workau2,workav2
     real(r_kind),allocatable,dimension(:,:):: workbu2,workbv2
 
+! for fv3_io_layout_y > 1
+    real(r_kind),allocatable,dimension(:,:):: u2d_layout,v2d_layout
+    integer(i_kind) :: nio
+    integer(i_kind),allocatable :: gfile_loc_layout(:)
+    character(len=180)  :: filename_layout
+
     mm1=mype+1
     
     nloncase=grd_uv%nlon
@@ -2213,15 +2219,30 @@ subroutine gsi_fv3ncdf_writeuv(grd_uv,ges_u,ges_v,add_saved,fv3filenamegin)
     end do
     call general_sub2grid(grd_uv,worksub,hwork)
     filenamein=fv3filenamegin%dynvars
-    call check( nf90_open(filenamein,nf90_write,gfile_loc,comm=mpi_comm_world,info=MPI_INFO_NULL) )
+
+    if(fv3_io_layout_y > 1) then
+      allocate(u2d_layout(nxcase,ny_layout+1))
+      allocate(v2d_layout(nxcase+1,ny_layout))
+
+      allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
+      do nio=0,fv3_io_layout_y-1
+        write(filename_layout,'(a,a,I4.4)') trim(filenamein),".",nio
+        call check( nf90_open(filename_layout,nf90_write,gfile_loc_layout(nio),comm=mpi_comm_world,info=MPI_INFO_NULL) )
+        write(*,*) "UV write=",mm1,trim(filename_layout)
+      enddo
+      gfile_loc=gfile_loc_layout(0)
+    else
+      call check( nf90_open(filenamein,nf90_write,gfile_loc,comm=mpi_comm_world,info=MPI_INFO_NULL) )
+    endif
+
     do ilevtot=kbgn,kend
       varname=grd_uv%names(1,ilevtot)
       ilev=grd_uv%lnames(1,ilevtot)
       nz=grd_uv%nsig
       nzp1=nz+1
       inative=nzp1-ilev
-      u_countloc=(/nxcase,nycase+1,1/)
-      v_countloc=(/nxcase+1,nycase,1/)
+      u_countloc=(/nxcase,ny_layout+1,1/)
+      v_countloc=(/nxcase+1,ny_layout,1/)
       u_startloc=(/1,1,inative/)
       v_startloc=(/1,1,inative/)
 
@@ -2236,8 +2257,18 @@ subroutine gsi_fv3ncdf_writeuv(grd_uv,ges_u,ges_v,add_saved,fv3filenamegin)
         allocate( workbu2(nlon_regional,nlat_regional+1))
         allocate( workbv2(nlon_regional+1,nlat_regional))
 !!!!!!!!  readin work_b !!!!!!!!!!!!!!!!
-        call check( nf90_get_var(gfile_loc,ugrd_VarId,work_bu,start=u_startloc,count=u_countloc) )
-        call check( nf90_get_var(gfile_loc,vgrd_VarId,work_bv,start=v_startloc,count=v_countloc) )
+        if(fv3_io_layout_y > 1) then
+          do nio=0,fv3_io_layout_y-1
+            call check( nf90_get_var(gfile_loc_layout(nio),ugrd_VarId,u2d_layout,start=u_startloc,count=u_countloc) )
+            work_bu(:,nio*ny_layout+1:(nio+1)*ny_layout)=u2d_layout(:,1:ny_layout)
+            if(nio==fv3_io_layout_y-1) work_bu(:,(nio+1)*ny_layout+1)=u2d_layout(:,ny_layout+1)
+            call check( nf90_get_var(gfile_loc_layout(nio),vgrd_VarId,v2d_layout,start=v_startloc,count=v_countloc) )
+            work_bv(:,nio*ny_layout+1:(nio+1)*ny_layout)=v2d_layout
+          enddo
+        else     
+          call check( nf90_get_var(gfile_loc,ugrd_VarId,work_bu,start=u_startloc,count=u_countloc) )
+          call check( nf90_get_var(gfile_loc,vgrd_VarId,work_bv,start=v_startloc,count=v_countloc) )
+        endif
         if(.not.grid_reverse_flag) then
           call reverse_grid_r_uv(work_bu,nlon_regional,nlat_regional+1,1)
           call reverse_grid_r_uv(work_bv,nlon_regional+1,nlat_regional,1)
@@ -2265,10 +2296,29 @@ subroutine gsi_fv3ncdf_writeuv(grd_uv,ges_u,ges_v,add_saved,fv3filenamegin)
         call reverse_grid_r_uv(work_bv,nlon_regional+1,nlat_regional,1)
       endif
 
-      call check( nf90_put_var(gfile_loc,ugrd_VarId,work_bu,start=u_startloc,count=u_countloc) )
-      call check( nf90_put_var(gfile_loc,vgrd_VarId,work_bv,start=v_startloc,count=v_countloc) )
+      if(fv3_io_layout_y > 1) then
+        do nio=0,fv3_io_layout_y-1
+          u2d_layout(:,1:ny_layout+1)=work_bu(:,nio*ny_layout+1:(nio+1)*ny_layout+1)
+          call check( nf90_put_var(gfile_loc_layout(nio),ugrd_VarId,u2d_layout,start=u_startloc,count=u_countloc) )
+          v2d_layout=work_bv(:,nio*ny_layout+1:(nio+1)*ny_layout)
+          call check( nf90_put_var(gfile_loc_layout(nio),vgrd_VarId,v2d_layout,start=v_startloc,count=v_countloc) )
+        enddo
+      else
+        call check( nf90_put_var(gfile_loc,ugrd_VarId,work_bu,start=u_startloc,count=u_countloc) )
+        call check( nf90_put_var(gfile_loc,vgrd_VarId,work_bv,start=v_startloc,count=v_countloc) )
+      endif
     enddo !ilevltot
-    call check( nf90_close(gfile_loc) )
+
+    if(fv3_io_layout_y > 1) then
+      deallocate(u2d_layout)
+      deallocate(v2d_layout)
+      do nio=0,fv3_io_layout_y-1
+        call check( nf90_close(gfile_loc_layout(nio)) )
+      enddo
+      deallocate(gfile_loc_layout)
+    else
+      call check( nf90_close(gfile_loc) )
+    endif
     deallocate(work_bu,work_bv,u2d,v2d)
     deallocate(work_au,work_av)
 
@@ -2543,6 +2593,11 @@ subroutine gsi_fv3ncdf_write(grd_ionouv,cstate_nouv,add_saved,filenamein,fv3file
     real(r_kind),allocatable,dimension(:,:):: work_b
     real(r_kind),allocatable,dimension(:,:):: workb2,worka2
 
+! for io_layout > 1
+    real(r_kind),allocatable,dimension(:,:):: work_b_layout
+    integer(i_kind) :: nio
+    integer(i_kind),allocatable :: gfile_loc_layout(:)
+    character(len=180)  :: filename_layout
 
     mm1=mype+1
     ! Convert from subdomain to full horizontal field distributed among
@@ -2558,7 +2613,22 @@ subroutine gsi_fv3ncdf_write(grd_ionouv,cstate_nouv,add_saved,filenamein,fv3file
     allocate( work_b(nlon_regional,nlat_regional))
     allocate( workb2(nlon_regional,nlat_regional))
     allocate( worka2(nlatcase,nloncase))
-    call check( nf90_open(filenamein,nf90_write,gfile_loc,comm=mpi_comm_world,info=MPI_INFO_NULL) )
+    write(*,'(a,8I8)') "write==",mm1,nlatcase,nloncase,nlon_regional,nlat_regional,nx,ny
+
+    if(fv3_io_layout_y > 1) then
+      allocate(work_b_layout(nlon_regional,ny_layout))
+
+      allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
+      do nio=0,fv3_io_layout_y-1
+        write(filename_layout,'(a,a,I4.4)') trim(filenamein),'.',nio
+        call check( nf90_open(filename_layout,nf90_write,gfile_loc_layout(nio),comm=mpi_comm_world,info=MPI_INFO_NULL) )
+        write(*,*) 'write=',mm1,trim(filename_layout)
+      enddo
+      gfile_loc=gfile_loc_layout(0)
+    else
+      call check( nf90_open(filenamein,nf90_write,gfile_loc,comm=mpi_comm_world,info=MPI_INFO_NULL) )
+    endif
+
     do ilevtot=kbgn,kend
       vgsiname=grd_ionouv%names(1,ilevtot)
       call getfv3lamfilevname(vgsiname,fv3filenamegin,filenamein2,varname)
@@ -2571,39 +2641,64 @@ subroutine gsi_fv3ncdf_write(grd_ionouv,cstate_nouv,add_saved,filenamein,fv3file
       nz=grd_ionouv%nsig
       nzp1=nz+1
       inative=nzp1-ilev
-      countloc=(/nxcase,nycase,1/)
+      countloc=(/nxcase,ny_layout,1/)
       startloc=(/1,1,inative/)
 
       work_a=hwork(1,:,:,ilevtot)
 
-
-
       call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
 
-
       if(index(vgsiname,"delzinc") > 0) then
-        call check( nf90_get_var(gfile_loc,VarId,work_b,start = startloc, count = countloc) )
+        if(fv3_io_layout_y > 1) then
+          do nio=0,fv3_io_layout_y-1
+            call check( nf90_get_var(gfile_loc_layout(nio),VarId,work_b_layout,start = startloc, count = countloc) )
+            work_b(:,nio*ny_layout+1:(nio+1)*ny_layout)=work_b_layout
+          enddo
+        else
+          call check( nf90_get_var(gfile_loc,VarId,work_b,start = startloc, count = countloc) )
+        endif
         call fv3_ll_to_h(work_a(:,:),workb2,nloncase,nlatcase,nlon_regional,nlat_regional,grid_reverse_flag)
         work_b(:,:)=work_b(:,:)+workb2(:,:)
       else
         if(add_saved)then
-          call check( nf90_get_var(gfile_loc,VarId,work_b,start = startloc, count = countloc) )
-       
-
+           if(fv3_io_layout_y > 1) then
+             do nio=0,fv3_io_layout_y-1
+                call check( nf90_get_var(gfile_loc_layout(nio),VarId,work_b_layout,start = startloc, count = countloc) )
+                work_b(:,nio*ny_layout+1:(nio+1)*ny_layout)=work_b_layout
+              enddo
+           else
+              call check( nf90_get_var(gfile_loc,VarId,work_b,start = startloc, count = countloc) )
+           endif
            call fv3_h_to_ll(work_b(:,:),worka2,nlon_regional,nlat_regional,nloncase,nlatcase,grid_reverse_flag)
 !!!!!!!! analysis_inc:  work_a !!!!!!!!!!!!!!!!
            work_a(:,:)=work_a(:,:)-worka2(:,:)
            call fv3_ll_to_h(work_a(:,:),workb2,nloncase,nlatcase,nlon_regional,nlat_regional,grid_reverse_flag)
            work_b(:,:)=work_b(:,:)+workb2(:,:)
          else  
-            call fv3_ll_to_h(work_a(:,:),work_b(:,:),nloncase,nlatcase,nlon_regional,nlat_regional,grid_reverse_flag)
+           call fv3_ll_to_h(work_a(:,:),work_b(:,:),nloncase,nlatcase,nlon_regional,nlat_regional,grid_reverse_flag)
          endif
+      endif 
+      if(fv3_io_layout_y > 1) then
+        do nio=0,fv3_io_layout_y-1
+           work_b_layout=work_b(:,nio*ny_layout+1:(nio+1)*ny_layout)
+           call check( nf90_put_var(gfile_loc_layout(nio),VarId,work_b_layout, start = startloc, count = countloc) )
+        enddo
+      else
+         call check( nf90_put_var(gfile_loc,VarId,work_b, start = startloc, count = countloc) )
       endif
-      call check( nf90_put_var(gfile_loc,VarId,work_b, start = startloc, count = countloc) )
 
     enddo !ilevtotl loop
-    call check(nf90_close(gfile_loc))
+    if(fv3_io_layout_y > 1) then
+      deallocate(work_b_layout)
+      do nio=0,fv3_io_layout_y-1
+        call check(nf90_close(gfile_loc_layout(nio)))
+      enddo
+      deallocate(gfile_loc_layout)
+    else
+      call check(nf90_close(gfile_loc))
+    endif
     deallocate(work_b,work_a)
+    deallocate(workb2,worka2)
 
 
 end subroutine gsi_fv3ncdf_write
