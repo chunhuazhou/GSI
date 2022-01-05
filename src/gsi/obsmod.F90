@@ -156,6 +156,7 @@ module obsmod
 !                          observation error (DOE) specification to
 !                          GSI namelist level.  
 !  2020-09-15  Wu        - add option tcp_posmatch to mitigate possibility of erroneous TC initialization
+!  2020-09-19  CAPS(J. Park) - add 'vad_near_analtime' flag to assimilate newvad obs around analysis time only
 !   2021-11-16 Zhao      - add option l_obsprvdiag (if true) to trigger the output of
 !                          observation provider and sub-provider information into
 !                          obsdiags files (used for AutoObsQC)
@@ -531,7 +532,12 @@ module obsmod
   public :: uv_doe_b_236
   public :: uv_doe_b_237
   public :: uv_doe_b_213
-  
+
+  public :: vad_near_analtime
+
+  ! The following correspond to OMPS LP observations:
+
+  public :: ompslp_mult_fact
 
   interface obsmod_init_instr_table
           module procedure init_instr_table_
@@ -680,7 +686,13 @@ module obsmod
   real(r_kind) :: uv_doe_a_236, uv_doe_b_236
   real(r_kind) :: uv_doe_a_237, uv_doe_b_237
   real(r_kind) :: uv_doe_a_213, uv_doe_b_213
+
+  logical vad_near_analtime 
   
+ ! The following correspond to OMPS LP observations:
+
+  real(r_kind) :: ompslp_mult_fact
+
 contains
 
   subroutine init_obsmod_dflts
@@ -952,7 +964,15 @@ contains
     uv_doe_b_237 = 0.0_r_kind      
     uv_doe_a_213 = 1.0_r_kind
     uv_doe_b_213 = 0.0_r_kind
+
+    ! This flag was set to assimilate newvad obs around anaylsis time only.
+    ! see 'read_prepbufr.f90'
+    vad_near_analtime = .false.
     
+    ! The following correspond to OMPS LP  observations:
+
+    ompslp_mult_fact = 2.0_r_kind
+
     return
   end subroutine init_obsmod_dflts
   
