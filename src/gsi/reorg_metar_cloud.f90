@@ -42,7 +42,7 @@ subroutine reorg_metar_cloud(cdata,nreal,ndata,cdata_all,maxobs,ngrid)
 
   use kinds, only: r_kind,i_kind,r_double
   use gridmod, only: nlon,nlat
-  use gridmod, only: region_dy,region_dx
+  use gridmod, only: region_dx
   use constants, only: one,half,zero
   use rapidrefresh_cldsurf_mod, only: metar_impact_radius
   use rapidrefresh_cldsurf_mod, only: l_metar_impact_radius_change, &
@@ -91,7 +91,7 @@ subroutine reorg_metar_cloud(cdata,nreal,ndata,cdata_all,maxobs,ngrid)
   parameter (spval_p = 99999._r_kind)
 
   real(r_kind)    ::     mindx,dxij,delat_radius,delta_height,radiusij
-  integer         ::     isprdij
+  integer(i_kind) ::     isprdij
 
 !
 ! 
@@ -281,11 +281,6 @@ subroutine reorg_metar_cloud(cdata,nreal,ndata,cdata_all,maxobs,ngrid)
                    if(l_metar_impact_radius_change) then
                       dxij=region_dx(j1,i1)
 
-!                      write(*,*) 'min_dist,dxij=',min_dist,dxij
-! cloud amount
-!                      write(*,'(10f10.1)') (cdata_temp(5+k),k=1,6)
-! cloud bottom height (m)
-!                      write(*,'(10f10.1)') (cdata_temp(11+k),k=1,6) 
                       cloudlevel_temp=-99999.0_r_kind
                       ic=0
                       do k=1,6
@@ -293,7 +288,6 @@ subroutine reorg_metar_cloud(cdata,nreal,ndata,cdata_all,maxobs,ngrid)
                             radiusij=metar_impact_radius_min + delat_radius* &
                                      max(min((cdata_temp(11+k)-metar_impact_radius_min_height)/delta_height,one),zero)
                             isprdij=int(radiusij/dxij+half)
-!                            write(*,*) 'radiusij, isprdij=',radiusij,isprdij
                             if(min_dist <= isprdij) then
                                 ic=ic+1
                                 cloudlevel_temp(0+ic)=cdata_temp(5+k)
@@ -308,8 +302,6 @@ subroutine reorg_metar_cloud(cdata,nreal,ndata,cdata_all,maxobs,ngrid)
                             cdata_temp(5+k)=cloudlevel_temp(0+k)
                             cdata_temp(11+k)=cloudlevel_temp(6+k)
                          enddo
-!                      write(*,'(10f10.1)') (cdata_temp(5+k),k=1,6)
-!                      write(*,'(10f10.1)') (cdata_temp(11+k),k=1,6) 
                       endif
                    else
                       ic=1
@@ -322,7 +314,7 @@ subroutine reorg_metar_cloud(cdata,nreal,ndata,cdata_all,maxobs,ngrid)
                          call stop2(50)
                       end if
                       do k=1,nreal
-                         cdata_all(k,iout) = cdata(k,ista_min)
+                         cdata_all(k,iout) = cdata_temp(k)
                       enddo
                       cdata_all(24,iout) = cdata_all(2,iout)   ! save observaion station i
                       cdata_all(25,iout) = cdata_all(3,iout)   ! save observaion station j

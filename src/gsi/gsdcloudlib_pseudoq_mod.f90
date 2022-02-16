@@ -136,7 +136,6 @@ SUBROUTINE cloudCover_Surface_col(mype,nsig, &
 !====================================================================
 !  Begin
 !
-   !write(6,*) 'cloudCover_Surface', mype, i_cloud_q_innovation
 !  set constant names consistent with original RUC code
 !
    vis2qc=-9999.0_r_single

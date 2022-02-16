@@ -146,7 +146,7 @@
                          n_ens,nlon_ens,nlat_ens,jcap_ens,jcap_ens_test,oz_univ_static,&
                          regional_ensemble_option,fv3sar_ensemble_opt,merge_two_grid_ensperts, &
                          full_ensemble,pseudo_hybens,pwgtflg,&
-                         beta_s0,s_ens_h,s_ens_v,init_hybrid_ensemble_parameters,&
+                         beta_s0,beta_e0,s_ens_h,s_ens_v,init_hybrid_ensemble_parameters,&
                          readin_localization,write_ens_sprd,eqspace_ensgrid,grid_ratio_ens,&
                          readin_beta,use_localization_grid,use_gfs_ens,q_hyb_ens,i_en_perts_io, &
                          l_ens_in_diff_time,ensemble_path,ens_fast_read,sst_staticB
@@ -484,6 +484,9 @@
 !  2021-11-16 Zhao    - add option l_obsprvdiag (if true) to trigger the output of
 !                       observation provider and sub-provider information into
 !                       obsdiags files (used for AutoObsQC)
+!  01-07-2022 Hu        Add fv3_io_layout_y to let fv3lam interface read/write subdomain restart
+!                       files. The fv3_io_layout_y needs to match fv3lam model
+!                       option io_layout(2).
 !
 !EOP
 !-------------------------------------------------------------------------
@@ -772,7 +775,7 @@
 !                                = 'V', then analysis grid covers V grid domain
 !     grid_ratio_nmmb   - ratio of analysis grid to nmmb model grid in nmmb model grid units.
 !     grid_ratio_fv3_regional - ratio of analysis grid to fv3 grid in fv3 grid units.
-!     fv3_io_layout_y         - io_layout of fv3 regional model in y direction.
+!     fv3_io_layout_y    - set to the same number as io_layout of fv3 regional model in y direction.
 !     grid_ratio_wrfmass - ratio of analysis grid to wrf mass grid in wrf grid units.
 !     grid_type_fv3_regional - type of fv3 model grid (grid orientation).
 !     twodvar_regional  - logical for regional 2d-var analysis
@@ -1287,6 +1290,9 @@
 !                                        beta_s(:) = beta_s0     , vertically varying weights given to static B ; 
 !                                        beta_e(:) = 1 - beta_s0 , vertically varying weights given ensemble derived covariance.
 !                            If (readin_beta) then beta_s and beta_e are read from a file and beta_s0 is not used.
+!     beta_e0 - default weight given to ensemble background error covariance
+!               (if .not. readin_beta). if beta_e0<0, then it is set to
+!               1.-beta_s0 (this is the default)
 !     s_ens_h             - homogeneous isotropic horizontal ensemble localization scale (km)
 !     s_ens_v             - vertical localization scale (grid units for now)
 !                              s_ens_h, s_ens_v, and beta_s0 are tunable parameters.
@@ -1331,7 +1337,7 @@
 !                         
   namelist/hybrid_ensemble/l_hyb_ens,uv_hyb_ens,q_hyb_ens,aniso_a_en,generate_ens,n_ens,nlon_ens,nlat_ens,jcap_ens,&
                 pseudo_hybens,merge_two_grid_ensperts,regional_ensemble_option,fv3sar_bg_opt,fv3sar_ensemble_opt,full_ensemble,pwgtflg,&
-                jcap_ens_test,beta_s0,s_ens_h,s_ens_v,readin_localization,eqspace_ensgrid,readin_beta,&
+                jcap_ens_test,beta_s0,beta_e0,s_ens_h,s_ens_v,readin_localization,eqspace_ensgrid,readin_beta,&
                 grid_ratio_ens, &
                 oz_univ_static,write_ens_sprd,use_localization_grid,use_gfs_ens, &
                 i_en_perts_io,l_ens_in_diff_time,ensemble_path,ens_fast_read,sst_staticB

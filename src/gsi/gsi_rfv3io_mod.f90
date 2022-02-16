@@ -14,6 +14,9 @@ module gsi_rfv3io_mod
 !   2019        ting    - modifications for use for ensemble IO and cold start files 
 !   2019-03-13  CAPS(C. Tong) - Port direct radar DA capabilities.
 !   2021-11-01  lei     - modify for fv3-lam parallel IO
+!   2022-01-07  Hu      - add code to readi/write subdomain restart files.
+!                         This function is needed when fv3 model sets
+!                         io_layout(2)>1
 ! subroutines included:
 !   sub gsi_rfv3io_get_grid_specs
 !   sub read_fv3_files 
@@ -1204,35 +1207,46 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
              cycle 
           endif
           iret=nf90_inquire_variable(gfile_loc,i,ndims=ndim)
-          if(allocated(dim_id    )) deallocate(dim_id    )
-          allocate(dim_id(ndim))
-          iret=nf90_inquire_variable(gfile_loc,i,dimids=dim_id)
-          if(allocated(sfc       )) deallocate(sfc       )
-          if(ndim >=3) then  !the block of 10 lines is compied from GSL gsi.
-             allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
-             if(fv3_io_layout_y > 1) then
-                do nio=0,fv3_io_layout_y-1
-                  iret=nf90_get_var(gfile_loc_layout(nio),i,sfc)
-                  sfc_fulldomain(:,ny_layout_b(nio):ny_layout_e(nio))=sfc(:,:,1)
-                enddo
-             else
-                iret=nf90_get_var(gfile_loc,i,sfc)
-                sfc_fulldomain(:,:)=sfc(:,:,1)
-             endif
-          else if (ndim == 2) then
-             allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),1))
-             if(fv3_io_layout_y > 1) then
-                do nio=0,fv3_io_layout_y-1
-                  iret=nf90_get_var(gfile_loc_layout(nio),i,sfc(:,:,1))
-                  sfc_fulldomain(:,ny_layout_b(nio):ny_layout_e(nio))=sfc(:,:,1)
-                enddo
-             else
-                iret=nf90_get_var(gfile_loc,i,sfc(:,:,1))
-                sfc_fulldomain(:,:)=sfc(:,:,1)
-             endif
-          else
+          if(ndim < 2) then
              write(*,*) "wrong dimension number ndim =",ndim
              call stop2(119)
+          endif
+          if(allocated(dim_id    )) deallocate(dim_id    )
+          allocate(dim_id(ndim))
+          if(fv3_io_layout_y > 1) then
+             do nio=0,fv3_io_layout_y-1
+               iret=nf90_inquire_variable(gfile_loc_layout(nio),i,dimids=dim_id)
+               if(allocated(sfc       )) deallocate(sfc       )
+               if(dim(dim_id(1)) == nx .and. dim(dim_id(2))==ny_layout_len(nio)) then
+                  if(ndim >=3) then
+                     allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
+                     iret=nf90_get_var(gfile_loc_layout(nio),i,sfc)
+                  else if (ndim == 2) then
+                     allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),1))
+                     iret=nf90_get_var(gfile_loc_layout(nio),i,sfc(:,:,1))
+                  endif
+               else
+                  write(*,*) "Mismatch dimension in surfacei reading:",nx,ny_layout_len(nio),dim(dim_id(1)),dim(dim_id(2))
+                  call stop2(119)
+               endif
+               sfc_fulldomain(:,ny_layout_b(nio):ny_layout_e(nio))=sfc(:,:,1)
+             enddo
+          else
+             iret=nf90_inquire_variable(gfile_loc,i,dimids=dim_id)
+             if(allocated(sfc       )) deallocate(sfc       )
+             if(dim(dim_id(1)) == nx .and. dim(dim_id(2))==ny) then
+                if(ndim >=3) then  !the block of 10 lines is compied from GSL gsi.
+                   allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
+                   iret=nf90_get_var(gfile_loc,i,sfc)
+                else if (ndim == 2) then
+                   allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),1))
+                   iret=nf90_get_var(gfile_loc,i,sfc(:,:,1))
+                endif
+             else
+                write(*,*) "Mismatch dimension in surfacei reading:",nx,ny,dim(dim_id(1)),dim(dim_id(2))
+                call stop2(119)
+             endif
+             sfc_fulldomain(:,:)=sfc(:,:,1)
           endif
           call fv3_h_to_ll(sfc_fulldomain,a,nx,ny,nxa,nya,grid_reverse_flag)
 
@@ -1293,14 +1307,17 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
              iret=nf90_inquire_variable(gfile_loc,k,ndims=ndim)
              if(allocated(dim_id    )) deallocate(dim_id    )
              allocate(dim_id(ndim))
-             iret=nf90_inquire_variable(gfile_loc,k,dimids=dim_id)
-             allocate(sfc1(dim(dim_id(1)),dim(dim_id(2))) )
              if(fv3_io_layout_y > 1) then
                 do nio=0,fv3_io_layout_y-1
+                  iret=nf90_inquire_variable(gfile_loc_layout(nio),k,dimids=dim_id)
+                  if(allocated(sfc1       )) deallocate(sfc1       )
+                  allocate(sfc1(dim(dim_id(1)),dim(dim_id(2))) )
                   iret=nf90_get_var(gfile_loc_layout(nio),k,sfc1)
                   sfc_fulldomain(:,ny_layout_b(nio):ny_layout_e(nio))=sfc1
                 enddo
              else
+                iret=nf90_inquire_variable(gfile_loc,k,dimids=dim_id)
+                allocate(sfc1(dim(dim_id(1)),dim(dim_id(2))) )
                 iret=nf90_get_var(gfile_loc,k,sfc1)
                 sfc_fulldomain=sfc1
              endif
@@ -2051,13 +2068,13 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     real(r_kind),pointer,dimension(:,:,:):: ges_w   =>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_delzinc   =>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_delp  =>NULL()
+    real(r_kind),dimension(:,:  ),allocatable:: ges_ps_write
 
 
     real(r_kind), dimension(lat2,lon2,nsig) :: io_arr_qr, io_arr_qs
     real(r_kind), dimension(lat2,lon2,nsig) :: io_arr_qg, io_arr_qnr
     real(r_kind), dimension(:,:,:),allocatable ::g_prsi 
 
-    real(r_kind), dimension(:,:),allocatable ::ges_ps_write
 
     it=ntguessig
     ier=0

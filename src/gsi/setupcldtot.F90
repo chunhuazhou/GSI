@@ -588,7 +588,6 @@ subroutine setupcldtot(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_di
                    q_obcount=q_obcount+1
        
                    ! all obs errors = 30%
-                   !error=one/(cloudqvis*3.E-01_r_kind)
                    ratio_errors=1.0_r_kind
                    val = error*ddiff
        
@@ -717,7 +716,6 @@ subroutine setupcldtot(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_di
   !! Write information to diagnostic file
   if(conv_diagsave)then
      if (i_cloud_q_innovation >= 20 .and. iip>0) then
-!         call dtime_show(myname,'diagsave:q',i_q_ob_type)
         if(netcdf_diag) call nc_diag_write
         if(binary_diag)then
            write(7)'  q',nchar,nreal,iip,mype,ioff0

@@ -37,9 +37,7 @@ module gridinfo
   use kinds,     only: i_kind, r_kind, r_single, i_long, r_double
   use params,    only: datapath, nlevs, nlons, nlats,           &
                        arw, nmm
-  use mpisetup, only: nproc, mpi_integer, mpi_real4
-  use mpimod,   only: mpi_comm_world
-
+  use mpisetup
   use netcdf_io
 
   implicit none

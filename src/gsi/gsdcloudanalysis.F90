@@ -24,7 +24,7 @@ subroutine  gsdcloudanalysis(mype)
 !    2017-03-23  Hu      - add code to use hybrid vertical coodinate in WRF MASS
 !                           core
 !    2019-10-10  Zhao    - add code to check and adjust Qr/qs/qg and Qnr for
-!                          each verical profile to reduce the background
+!                          each vertical profile to reduce the background
 !                          reflectivity ghost in final analysis. (for RTMA3D
 !                          only now, option l_precip_vertical_check)
 !    2020-04-16  Zhao    - modifications to the code which checks and adjusts the vertical
@@ -932,7 +932,6 @@ subroutine  gsdcloudanalysis(mype)
 !         in order to remove/reduce the backround reflectivity "ghost" in
 !         analysis.
 !         Note: here rain_3d, snow_3d have been already changed into unit of kg/kg.
-!     if(l_precip_vertical_check) then
      if(i_precip_vertical_check > 0) then
 
         if(print_verbose) then
@@ -944,7 +943,7 @@ subroutine  gsdcloudanalysis(mype)
         end if
 
         qnr_limit=200000_r_kind
-        dbz_clean_graupel=35.0
+        dbz_clean_graupel=35.0_r_kind
 
         do j=2,lat2-1
            do i=2,lon2-1
@@ -995,7 +994,8 @@ subroutine  gsdcloudanalysis(mype)
                                 ratio_hyd_bk2obs=max(min(max_retrieved_qrqs/qrqs_retrieved,1.0_r_kind),0.0_r_kind)
                                 if(rain_3d(i,j,k) > zero) then
                                    rain_3d(i,j,k) = rain_3d(i,j,k)*ratio_hyd_bk2obs
-                                   nrain_3d(i,j,k)= min(nrain_3d(i,j,k)/ratio_hyd_bk2obs*2.5_r_kind,qnr_limit)    ! 2.5(old) or 1.0(new4) or 1.5(new5/6) 2.5(old, new7) 2.0(new8)
+                                   ! for nrain_3d:  2.5(old) or 1.0(new4) or 1.5(new5/6) 2.5(old, new7) 2.0(new8)
+                                   nrain_3d(i,j,k)= min(nrain_3d(i,j,k)/ratio_hyd_bk2obs*2.5_r_kind,qnr_limit)
                                 endif
                                 if(snow_3d(i,j,k) > zero) then
                                    snow_3d(i,j,k) = snow_3d(i,j,k)*ratio_hyd_bk2obs
