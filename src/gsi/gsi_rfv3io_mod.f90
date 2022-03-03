@@ -29,6 +29,7 @@ module gsi_rfv3io_mod
 !   sub gsi_fv3ncdf_writeps
 !   sub gsi_fv3ncdf_write
 !   sub gsi_fv3ncdf_write_v1
+!   sub gsi_fv3ncdf2d_write
 !   sub check
 !
 ! variable definitions:
@@ -45,6 +46,7 @@ module gsi_rfv3io_mod
   use gsi_bundlemod, only : gsi_bundle
   use general_sub2grid_mod, only: sub2grid_info
   use gridmod,  only: fv3_io_layout_y
+  use rapidrefresh_cldsurf_mod, only: i_use_2mq4b,i_use_2mt4b
   implicit none
   public type_fv3regfilenameg
   public bg_fv3regfilenameg
@@ -106,7 +108,7 @@ module gsi_rfv3io_mod
   public :: mype_u,mype_v,mype_t,mype_q,mype_p,mype_oz,mype_ql
   public :: mype_qi,mype_qr,mype_qs,mype_qg,mype_qnr,mype_w
   public :: k_slmsk,k_tsea,k_vfrac,k_vtype,k_stype,k_zorl,k_smc,k_stc
-  public :: k_snwdph,k_f10m,mype_2d,n2d,k_orog,k_psfc
+  public :: k_snwdph,k_f10m,mype_2d,n2d,k_orog,k_psfc,k_th2m,k_q2m
   public :: ijns,ijns2d,displss,displss2d,ijnz,displsz_g
   public :: fv3lam_io_dynmetvars3d_nouv,fv3lam_io_tracermetvars3d_nouv
   public :: fv3lam_io_dynmetvars2d_nouv,fv3lam_io_tracermetvars2d_nouv
@@ -115,7 +117,7 @@ module gsi_rfv3io_mod
   integer(i_kind) mype_qi,mype_qr,mype_qs,mype_qg,mype_qnr,mype_w
 
   integer(i_kind) k_slmsk,k_tsea,k_vfrac,k_vtype,k_stype,k_zorl,k_smc,k_stc
-  integer(i_kind) k_snwdph,k_f10m,mype_2d,n2d,k_orog,k_psfc
+  integer(i_kind) k_snwdph,k_f10m,mype_2d,n2d,k_orog,k_psfc,k_th2m,k_q2m
   parameter(                   &  
     k_f10m =1,                  &   !fact10
     k_stype=2,                  &   !soil_type
@@ -127,8 +129,10 @@ module gsi_rfv3io_mod
     k_stc  =8,                  &   !soil_temp
     k_smc  =9,                  &   !soil_moi
     k_slmsk=10,                 &   !isli
-    k_orog =11,                 & !terrain
-    n2d=11                   )
+    k_th2m =11,                 & ! 2 m T
+    k_q2m  =12,                 & ! 2 m Q
+    k_orog =13,                 & !terrain
+    n2d=13                   )
   logical :: grid_reverse_flag
   character(len=max_varname_length),allocatable,dimension(:) :: fv3lam_io_dynmetvars3d_nouv 
                                     ! copy of cvars3d excluding uv 3-d fields   
@@ -708,7 +712,7 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
     use mpimod, only: mpi_comm_world
     use guess_grids, only:ges_prsi
     use gridmod, only: lat2,lon2,nsig,ijn,eta1_ll,eta2_ll,ijn_s
-    use constants, only: one,fv
+    use constants, only: one,fv,rd_over_cp_mass,r10,r1000
     use gsi_metguess_mod, only: gsi_metguess_bundle
     use gsi_bundlemod, only: gsi_bundleinquire, gsi_bundlegetpointer
     use gsi_bundlemod, only: gsi_bundlecreate,gsi_bundledestroy
@@ -740,6 +744,8 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
     real(r_kind),dimension(:,:,:),pointer::ges_tv=>NULL()
     real(r_kind),dimension(:,:,:),pointer::ges_tsen_readin=>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_delp  =>NULL()
+    real(r_kind),dimension(:,:),pointer::ges_th2m=>NULL()
+    real(r_kind),dimension(:,:),pointer::ges_q2m=>NULL()
 
     real(r_kind),dimension(:,:,:),pointer::ges_ql=>NULL()
     real(r_kind),dimension(:,:,:),pointer::ges_qi=>NULL()
@@ -884,6 +890,10 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
             ntracerio2d=ntracerio2d+1
           else if(trim(vartem)=='z') then
              write(6,*)'the metvarname ',trim(vartem),' will be dealt separately'
+          else if(trim(vartem)=='th2m') then
+             !write(6,*)'the metvarname ',trim(vartem),' will be dealt separately'
+          else if(trim(vartem)=='q2m') then
+             !write(6,*)'the metvarname ',trim(vartem),' will be dealt separately'
           else 
             write(6,*)'the metvarname2 ',trim(vartem),' has not been considered yet, stop'
             call stop2(333)
@@ -898,7 +908,8 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
       jtracer=0
       do i=1,size(name_metvars2d)
         vartem=trim(name_metvars2d(i))
-        if(.not.( (trim(vartem)=='ps'.and.fv3sar_bg_opt==0).or.(trim(vartem)=="z")))  then !z is treated separately
+        if(.not.( (trim(vartem)=='ps'.and.fv3sar_bg_opt==0).or.(trim(vartem)=="z") &
+                  .or.(trim(vartem)=="th2m").or.(trim(vartem)=="q2m")))  then !z is treated separately
           if (ifindstrloc(vardynvars,trim(vartem)) > 0) then
             jdynvar=jdynvar+1
             fv3lam_io_dynmetvars2d_nouv(jdynvar)=trim(vartem)
@@ -1017,8 +1028,15 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
          call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'qnr',ges_qnr ,istatus );ier=ier+istatus
          call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'w' , ges_w ,istatus );ier=ier+istatus
       end if
-
       if (ier/=0) call die(trim(myname),'cannot get pointers for fv3 met-fields, ier =',ier)
+
+      if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
+         call GSI_BundleGetPointer (GSI_MetGuess_Bundle(it),'q2m',ges_q2m,istatus ); ier=ier+istatus
+         if (ier/=0) call die(trim(myname),'cannot get pointers for q2m, ier=',ier)
+         call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it),'th2m',ges_th2m, istatus );ier=ier+istatus
+         if (ier/=0) call die(trim(myname),'cannot get pointers for th2m,ier=',ier)
+      endif
+
       if( fv3sar_bg_opt == 0) then 
          call gsi_fv3ncdf_readuv(grd_fv3lam_uv,ges_u,ges_v,fv3filenamegin)
       else
@@ -1071,7 +1089,14 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
        
       endif
 
-      call gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
+      call gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_th2m,ges_q2m)
+
+      if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
+! need to convert t2m to potentional T in ges_th2m
+         ges_th2m=ges_th2m*(r1000/(r10*ges_ps_bg))**rd_over_cp_mass
+! Convert 2m guess mixing ratio to specific humidity
+         ges_q2m = ges_q2m/(one+ges_q2m)
+      endif
 
       if (l_use_dbz_directDA ) then
         if( fv3sar_bg_opt == 0) then
@@ -1089,7 +1114,7 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
 
 end subroutine read_fv3_netcdf_guess
 
-subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
+subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_th2m,ges_q2m)
 !$$$  subprogram documentation block
 !                .      .    .                                       .
 ! subprogram:    gsi_fv3ncdf2d_read       
@@ -1125,6 +1150,8 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
 
     integer(i_kind),intent(in) :: it   
     real(r_kind),intent(in),dimension(:,:),pointer::ges_z
+    real(r_kind),intent(in),dimension(:,:),pointer::ges_th2m
+    real(r_kind),intent(in),dimension(:,:),pointer::ges_q2m
     type (type_fv3regfilenameg),intent(in) :: fv3filenamegin
     character(len=max_varname_length) :: name
     integer(i_kind),allocatable,dimension(:):: dim_id,dim
@@ -1203,6 +1230,10 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
              k=k_smc
           else if( trim(name)=='SLMSK'.or.trim(name)=='slmsk' ) then
              k=k_slmsk
+          else if( trim(name)=='T2M'.or.trim(name)=='t2m' ) then
+             k=k_th2m
+          else if( trim(name)=='Q2M'.or.trim(name)=='q2m' ) then
+             k=k_q2m
           else
              cycle 
           endif
@@ -1370,6 +1401,10 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z)
     soil_moi(:,:,it)=sfcn2d(:,:,k_smc)
     ges_z(:,:)=sfcn2d(:,:,k_orog)/grav
     isli(:,:,it)=nint(sfcn2d(:,:,k_slmsk))
+    if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
+       ges_th2m(:,:)=sfcn2d(:,:,k_th2m)
+       ges_q2m(:,:)=sfcn2d(:,:,k_q2m)
+    endif
     deallocate (sfcn2d,a)
     return
 end subroutine gsi_fv3ncdf2d_read
@@ -2043,6 +2078,8 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     use directDA_radaruse_mod, only: l_use_dbz_directDA
     use directDA_radaruse_mod, only: l_cvpnr, cvpnr_pval
     use gridmod,  only: eta1_ll,eta2_ll
+    use constants, only: one,rd_over_cp_mass,r10,r1000
+    use mpimod, only: mype
 
 
     implicit none
@@ -2056,6 +2093,8 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     real(r_kind),pointer,dimension(:,:,:):: ges_u   =>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_v   =>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_q   =>NULL()
+    real(r_kind),pointer,dimension(:,:  ):: ges_th2m =>NULL()
+    real(r_kind),pointer,dimension(:,:  ):: ges_q2m  =>NULL()
    
     integer(i_kind) i,k
 
@@ -2091,6 +2130,11 @@ subroutine wrfv3_netcdf(fv3filenamegin)
        call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'qnr',ges_qnr,istatus);ier=ier+istatus
        call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'w' , ges_w ,istatus);ier=ier+istatus
     end if
+    if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
+       call GSI_BundleGetPointer (GSI_MetGuess_Bundle(it),'q2m',ges_q2m,istatus); ier=ier+istatus
+       call GSI_BundleGetPointer (GSI_MetGuess_Bundle(it),'th2m',ges_th2m,istatus );ier=ier+istatus
+    endif
+
     if(l_reg_update_hydro_delz) then
       allocate(ges_delzinc(lat2,lon2,nsig))
       do k=1,nsig
@@ -2147,8 +2191,14 @@ subroutine wrfv3_netcdf(fv3filenamegin)
 !   write out
     if (ier/=0) call die('get ges','cannot get pointers for fv3 met-fields, ier =',ier)
 
-    add_saved=.true.
+    if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
+! need to convert t2m from potentional T  to T in ges_th2m
+      ges_th2m=ges_th2m*((r10*ges_ps_bg)/r1000)**rd_over_cp_mass
+! Convert 2m guess specific humidity to mixing ratio
+      ges_q2m = ges_q2m/(one-ges_q2m)
+    endif
 
+    add_saved=.true.
 !   write out
     if(fv3sar_bg_opt == 0) then
       call gsi_fv3ncdf_write(grd_fv3lam_dynvar_ionouv,gsibundle_fv3lam_dynvar_nouv,&
@@ -2165,6 +2215,12 @@ subroutine wrfv3_netcdf(fv3filenamegin)
                                 add_saved,fv3filenamegin%tracers,fv3filenamegin)
       call gsi_fv3ncdf_writeuv_v1(grd_fv3lam_uv,ges_u,ges_v,add_saved,fv3filenamegin)
     endif
+
+    if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
+      call gsi_fv3ncdf_write_sfc(fv3filenamegin,'t2m',ges_th2m,add_saved)
+      call gsi_fv3ncdf_write_sfc(fv3filenamegin,'q2m',ges_q2m,add_saved)
+    endif
+
     if(allocated(g_prsi)) deallocate(g_prsi)
 
     deallocate(ny_layout_len)
@@ -2591,6 +2647,144 @@ subroutine gsi_fv3ncdf_writeuv_v1(grd_uv,ges_u,ges_v,add_saved,fv3filenamegin)
 
 end subroutine gsi_fv3ncdf_writeuv_v1
 
+subroutine gsi_fv3ncdf_write_sfc(fv3filenamegin,varname,var,add_saved)
+!$$$  subprogram documentation block
+!                .      .    .                                        .
+! subprogram:    gsi_fv3ncdf_write_sfc
+!   pgrmmr: wu
+!
+! abstract:
+!
+! program history log:
+! 2022-02-25  Hu  write surface fields  
+!   input argument list:
+!
+!   output argument list:
+!
+! attributes:
+!   language: f90
+!   machine:
+!
+!$$$ end documentation block
+
+    use mpimod, only: ierror,mpi_comm_world,npe,mpi_rtype,mype
+    use gridmod, only: lat1,lon1,lat2,lon2,nlat,nlon
+    use gridmod, only: ijn,displs_g,itotsub,iglobal
+    use gridmod,  only: nlon_regional,nlat_regional
+    use mod_fv3_lola, only: fv3_ll_to_h,fv3_h_to_ll
+    use general_commvars_mod, only: ltosi,ltosj
+    use netcdf, only: nf90_open,nf90_close
+    use netcdf, only: nf90_write,nf90_inq_varid
+    use netcdf, only: nf90_put_var,nf90_get_var
+    use gridmod, only: strip
+    implicit none
+
+    real(r_kind)   ,intent(in   ) :: var(lat2,lon2)
+    logical        ,intent(in   ) :: add_saved
+    character(*)   ,intent(in   ) :: varname
+    type (type_fv3regfilenameg),intent (in) :: fv3filenamegin
+
+    integer(i_kind) :: VarId,gfile_loc
+    integer(i_kind) i,j,mm1
+    real(r_kind),allocatable,dimension(:):: work
+    real(r_kind),allocatable,dimension(:,:):: work_sub,work_a
+    real(r_kind),allocatable,dimension(:,:):: work_b
+    real(r_kind),allocatable,dimension(:,:):: workb2,worka2
+    character(len=80)   :: filename
+
+! for io_layout > 1
+    real(r_kind),allocatable,dimension(:,:):: work_b_layout
+    integer(i_kind) :: nio
+    integer(i_kind),allocatable :: gfile_loc_layout(:)
+    character(len=180)  :: filename_layout
+
+    filename=trim(fv3filenamegin%sfcdata)
+
+    mm1=mype+1
+    allocate(work(max(iglobal,itotsub)),work_sub(lat1,lon1))
+    call strip(var,work_sub)
+    call mpi_gatherv(work_sub,ijn(mm1),mpi_rtype, &
+          work,ijn,displs_g,mpi_rtype,0,mpi_comm_world,ierror)
+    deallocate(work_sub)
+
+    if(mype==0) then
+       write(*,*) 'check===',nlat,nlon,nlon_regional,nlat_regional
+       write(*,*) '0',maxval(work),minval(work)
+       allocate( work_a(nlat,nlon))
+       do i=1,iglobal
+          work_a(ltosi(i),ltosj(i))=work(i)
+       end do
+       write(*,*) '1',maxval(work_a),minval(work_a)
+       write(*,*) trim(filename),trim(varname)
+       allocate( work_b(nlon_regional,nlat_regional))
+
+
+       if(fv3_io_layout_y > 1) then
+         allocate(gfile_loc_layout(0:fv3_io_layout_y-1))
+         do nio=0,fv3_io_layout_y-1
+            write(filename_layout,'(a,a,I4.4)') trim(filename),'.',nio
+            call check(nf90_open(trim(filename_layout),nf90_write,gfile_loc_layout(nio)) )
+         enddo
+         gfile_loc=gfile_loc_layout(0)
+       else
+         call check( nf90_open(trim(filename),nf90_write,gfile_loc) )
+       endif
+       call check( nf90_inq_varid(gfile_loc,trim(varname),VarId) )
+
+       if(add_saved)then
+          allocate( workb2(nlon_regional,nlat_regional))
+          allocate( worka2(nlat,nlon))
+!!!!!!!! read in guess !!!!!!!!!!!!!!
+
+          if(fv3_io_layout_y > 1) then
+             do nio=0,fv3_io_layout_y-1
+                allocate(work_b_layout(nlon_regional,ny_layout_len(nio)))
+                call check(nf90_get_var(gfile_loc_layout(nio),VarId,work_b_layout) )
+                work_b(:,ny_layout_b(nio):ny_layout_e(nio))=work_b_layout
+                deallocate(work_b_layout)
+              enddo
+          else
+             call check( nf90_get_var(gfile_loc,VarId,work_b) )
+          endif
+          write(*,*) '2',maxval(work_b),minval(work_b)
+          call fv3_h_to_ll(work_b,worka2,nlon_regional,nlat_regional,nlon,nlat,grid_reverse_flag)
+!!!!!!! analysis_inc work_a
+          work_a(:,:)=work_a(:,:)-worka2(:,:)
+          write(*,*) '3',maxval(work_a),minval(work_a)
+          call fv3_ll_to_h(work_a,workb2,nlon,nlat,nlon_regional,nlat_regional,grid_reverse_flag)
+             work_b(:,:)=work_b(:,:)+workb2(:,:)
+          write(*,*) '4',maxval(work_b),minval(work_b)
+          deallocate(worka2,workb2)
+       else
+          call fv3_ll_to_h(work_a,work_b,nlon,nlat,nlon_regional,nlat_regional,grid_reverse_flag)
+       endif
+
+       if(fv3_io_layout_y > 1) then
+         do nio=0,fv3_io_layout_y-1
+            allocate(work_b_layout(nlon_regional,ny_layout_len(nio)))
+            work_b_layout=work_b(:,ny_layout_b(nio):ny_layout_e(nio))
+            call check( nf90_put_var(gfile_loc_layout(nio),VarId,work_b_layout) )
+            deallocate(work_b_layout)
+         enddo
+       else
+          call check( nf90_put_var(gfile_loc,VarId,work_b) )
+       endif
+
+       if(fv3_io_layout_y > 1) then
+         do nio=0,fv3_io_layout_y-1
+           call check(nf90_close(gfile_loc_layout(nio)))
+         enddo
+         deallocate(gfile_loc_layout)
+       else
+         call check(nf90_close(gfile_loc))
+       endif
+       write(*,*) maxval(work_b),minval(work_b)
+       deallocate(work_b,work_a)
+    end if !mype_io
+
+    deallocate(work)
+
+end subroutine gsi_fv3ncdf_write_sfc
 
 subroutine gsi_fv3ncdf_write(grd_ionouv,cstate_nouv,add_saved,filenamein,fv3filenamegin)
 !$$$  subprogram documentation block
@@ -3484,5 +3678,4 @@ function ifindstrloc(str_array,strin)
     enddo
 end function ifindstrloc
     
-
 end module gsi_rfv3io_mod
