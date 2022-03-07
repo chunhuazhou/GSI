@@ -1188,9 +1188,13 @@ contains
                    ges_xlat(j,i,it)=real(all_loc(j,i,i_xlat),r_kind)/rad2deg_single
                 endif
                 if(l_gsd_soilTQ_nudge) then
-                   ges_th2_it(j,i)=real(all_loc(j,i,i_th2),r_kind)
                    ges_tsk_it(j,i)=real(all_loc(j,i,i_tsk),r_kind)
                    ges_soilt1_it(j,i)=real(all_loc(j,i,i_soilt1),r_kind)
+                endif
+                if(i_use_2mt4b > 0 ) then
+                   ges_th2_it(j,i)=real(all_loc(j,i,i_th2),r_kind)
+  ! convert from potential to sensible temperature
+                   ges_th2_it(j,i)=ges_th2_it(j,i)*(ges_ps_it(j,i)/r100)**rd_over_cp_mass
                 endif
                 if(i_use_2mq4b>0) then
                   ges_q2_it(j,i)=real(all_loc(j,i,i_q2),r_kind)
@@ -2252,6 +2256,8 @@ contains
                 sfc_rough(j,i,it)=rough_default
                 if(i_use_2mt4b > 0 ) then
                    ges_th2_it(j,i)=real(all_loc(j,i,i_0+i_th2),r_kind)
+  ! convert from potential to sensible temperature
+                   ges_th2_it(j,i)=ges_th2_it(j,i)*(ges_ps_it(j,i)/r100)**rd_over_cp_mass
                 endif
   ! for GSD soil nudging
                 if(l_gsd_soilTQ_nudge) then

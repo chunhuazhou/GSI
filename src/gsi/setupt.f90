@@ -744,8 +744,6 @@ subroutine setupt(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
 !          Interpolate guess th 2m to observation location and time
               call tintrp2a11_csln(ges_th2,tges2m,tges2m_water,dlat,dlon,dtime,hrdifsig,&
                 mype,nfldsig)
-              tges2m=tges2m*(r10*psges/r1000)**rd_over_cp_mass  ! convert to sensible T         
-              tges2m_water=tges2m_water*(r10*psges/r1000)**rd_over_cp_mass  ! convert to sensible T         
               if(iqtflg)then
                  call tintrp2a11_csln(ges_q2,qges2m,qges2m_water,dlat,dlon,dtime,hrdifsig,&
                      mype,nfldsig)
@@ -757,7 +755,6 @@ subroutine setupt(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
 !          Interpolate guess th 2m to observation location and time
               call tintrp2a11(ges_th2,tges2m,dlat,dlon,dtime,hrdifsig,&
                 mype,nfldsig)
-              tges2m=tges2m*(r10*psges/r1000)**rd_over_cp_mass  ! convert to sensible T         
               if(iqtflg)then
                  call tintrp2a11(ges_q2,qges2m,dlat,dlon,dtime,hrdifsig,&
                      mype,nfldsig)

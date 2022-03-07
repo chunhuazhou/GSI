@@ -1092,8 +1092,7 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
       call gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_th2m,ges_q2m)
 
       if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
-! need to convert t2m to potentional T in ges_th2m
-         ges_th2m=ges_th2m*(r1000/(r10*ges_ps_bg))**rd_over_cp_mass
+! do not need to convert t2m to potentional T in ges_th2m
 ! Convert 2m guess mixing ratio to specific humidity
          ges_q2m = ges_q2m/(one+ges_q2m)
       endif
@@ -2192,8 +2191,7 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     if (ier/=0) call die('get ges','cannot get pointers for fv3 met-fields, ier =',ier)
 
     if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
-! need to convert t2m from potentional T  to T in ges_th2m
-      ges_th2m=ges_th2m*((r10*ges_ps_bg)/r1000)**rd_over_cp_mass
+! do not need to convert t2m from potentional T  to T in ges_th2m
 ! Convert 2m guess specific humidity to mixing ratio
       ges_q2m = ges_q2m/(one-ges_q2m)
     endif
@@ -2708,14 +2706,10 @@ subroutine gsi_fv3ncdf_write_sfc(fv3filenamegin,varname,var,add_saved)
     deallocate(work_sub)
 
     if(mype==0) then
-       write(*,*) 'check===',nlat,nlon,nlon_regional,nlat_regional
-       write(*,*) '0',maxval(work),minval(work)
        allocate( work_a(nlat,nlon))
        do i=1,iglobal
           work_a(ltosi(i),ltosj(i))=work(i)
        end do
-       write(*,*) '1',maxval(work_a),minval(work_a)
-       write(*,*) trim(filename),trim(varname)
        allocate( work_b(nlon_regional,nlat_regional))
 
 
@@ -2746,14 +2740,11 @@ subroutine gsi_fv3ncdf_write_sfc(fv3filenamegin,varname,var,add_saved)
           else
              call check( nf90_get_var(gfile_loc,VarId,work_b) )
           endif
-          write(*,*) '2',maxval(work_b),minval(work_b)
           call fv3_h_to_ll(work_b,worka2,nlon_regional,nlat_regional,nlon,nlat,grid_reverse_flag)
 !!!!!!! analysis_inc work_a
           work_a(:,:)=work_a(:,:)-worka2(:,:)
-          write(*,*) '3',maxval(work_a),minval(work_a)
           call fv3_ll_to_h(work_a,workb2,nlon,nlat,nlon_regional,nlat_regional,grid_reverse_flag)
              work_b(:,:)=work_b(:,:)+workb2(:,:)
-          write(*,*) '4',maxval(work_b),minval(work_b)
           deallocate(worka2,workb2)
        else
           call fv3_ll_to_h(work_a,work_b,nlon,nlat,nlon_regional,nlat_regional,grid_reverse_flag)
@@ -2778,7 +2769,6 @@ subroutine gsi_fv3ncdf_write_sfc(fv3filenamegin,varname,var,add_saved)
        else
          call check(nf90_close(gfile_loc))
        endif
-       write(*,*) maxval(work_b),minval(work_b)
        deallocate(work_b,work_a)
     end if !mype_io
 

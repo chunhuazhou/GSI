@@ -89,7 +89,7 @@ contains
     use constants, only: soilmoistmin
     use gsi_io, only: lendian_in,verbose
     use rapidrefresh_cldsurf_mod, only: l_hydrometeor_bkio,l_gsd_soilTQ_nudge,&
-         i_use_2mq4b
+         i_use_2mq4b,i_use_2mt4b
     use wrf_mass_guess_mod, only: destroy_cld_grids
     use gsi_bundlemod, only: GSI_BundleGetPointer
     use gsi_metguess_mod, only: gsi_metguess_get,GSI_MetGuess_Bundle
@@ -751,8 +751,6 @@ contains
           end do
        end do
        ier=0
-       call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'th2m',  ges_th2, istatus );ier=ier+istatus
-       call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'q2m' ,  ges_q2,  istatus );ier=ier+istatus
        call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'tsoil', ges_soilt1, istatus );ier=ier+istatus
        call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'tskn' , ges_tsk , istatus );ier=ier+istatus
        if (ier/=0) then ! doesn't have to die - code can be generalized to bypass missing vars
@@ -764,12 +762,23 @@ contains
           do j=1,lat1
              jp1=j+1
              all_loc(j,i,i_tsk)=ges_tsk(jp1,ip1)
-             all_loc(j,i,i_th2)=ges_th2(jp1,ip1)
              all_loc(j,i,i_soilt1)=ges_soilt1(jp1,ip1)
           end do
        end do
     endif ! l_gsd_soilTQ_nudge
+    if(i_use_2mt4b > 0 ) then
+       call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'th2m',  ges_th2, istatus );ier=ier+istatus
+       do i=1,lon1
+          ip1=i+1
+          do j=1,lat1
+  !  Convert 2m sensible T to potential T
+             jp1=j+1
+             all_loc(j,i,i_th2)=ges_th2(jp1,ip1)*(r100/ges_ps(jp1,ip1))**rd_over_cp_mass
+          end do
+       end do
+    endif
     if (i_use_2mq4b > 0) then
+       call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'q2m' ,  ges_q2,  istatus );ier=ier+istatus
        do i=1,lon1
           ip1=i+1
           do j=1,lat1
@@ -2559,9 +2568,10 @@ contains
            write(6,*)'wrwrfmassa_netcdf: getpointer failed, cannot retrieve th2'
            call stop2(999)
        endif
+! convert to potential T
        do i=1,lon2
           do j=1,lat2
-             all_loc(j,i,i_th2)=ges_th2(j,i)
+             all_loc(j,i,i_th2)=ges_th2(j,i)*(r100/ges_ps(j,i))**rd_over_cp_mass
           end do
        end do
     endif
