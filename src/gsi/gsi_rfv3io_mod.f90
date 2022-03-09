@@ -108,7 +108,7 @@ module gsi_rfv3io_mod
   public :: mype_u,mype_v,mype_t,mype_q,mype_p,mype_oz,mype_ql
   public :: mype_qi,mype_qr,mype_qs,mype_qg,mype_qnr,mype_w
   public :: k_slmsk,k_tsea,k_vfrac,k_vtype,k_stype,k_zorl,k_smc,k_stc
-  public :: k_snwdph,k_f10m,mype_2d,n2d,k_orog,k_psfc,k_th2m,k_q2m
+  public :: k_snwdph,k_f10m,mype_2d,n2d,k_orog,k_psfc,k_t2m,k_q2m
   public :: ijns,ijns2d,displss,displss2d,ijnz,displsz_g
   public :: fv3lam_io_dynmetvars3d_nouv,fv3lam_io_tracermetvars3d_nouv
   public :: fv3lam_io_dynmetvars2d_nouv,fv3lam_io_tracermetvars2d_nouv
@@ -117,7 +117,7 @@ module gsi_rfv3io_mod
   integer(i_kind) mype_qi,mype_qr,mype_qs,mype_qg,mype_qnr,mype_w
 
   integer(i_kind) k_slmsk,k_tsea,k_vfrac,k_vtype,k_stype,k_zorl,k_smc,k_stc
-  integer(i_kind) k_snwdph,k_f10m,mype_2d,n2d,k_orog,k_psfc,k_th2m,k_q2m
+  integer(i_kind) k_snwdph,k_f10m,mype_2d,n2d,k_orog,k_psfc,k_t2m,k_q2m
   parameter(                   &  
     k_f10m =1,                  &   !fact10
     k_stype=2,                  &   !soil_type
@@ -129,7 +129,7 @@ module gsi_rfv3io_mod
     k_stc  =8,                  &   !soil_temp
     k_smc  =9,                  &   !soil_moi
     k_slmsk=10,                 &   !isli
-    k_th2m =11,                 & ! 2 m T
+    k_t2m =11,                 & ! 2 m T
     k_q2m  =12,                 & ! 2 m Q
     k_orog =13,                 & !terrain
     n2d=13                   )
@@ -744,7 +744,7 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
     real(r_kind),dimension(:,:,:),pointer::ges_tv=>NULL()
     real(r_kind),dimension(:,:,:),pointer::ges_tsen_readin=>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_delp  =>NULL()
-    real(r_kind),dimension(:,:),pointer::ges_th2m=>NULL()
+    real(r_kind),dimension(:,:),pointer::ges_t2m=>NULL()
     real(r_kind),dimension(:,:),pointer::ges_q2m=>NULL()
 
     real(r_kind),dimension(:,:,:),pointer::ges_ql=>NULL()
@@ -890,7 +890,7 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
             ntracerio2d=ntracerio2d+1
           else if(trim(vartem)=='z') then
              write(6,*)'the metvarname ',trim(vartem),' will be dealt separately'
-          else if(trim(vartem)=='th2m') then
+          else if(trim(vartem)=='t2m') then
              !write(6,*)'the metvarname ',trim(vartem),' will be dealt separately'
           else if(trim(vartem)=='q2m') then
              !write(6,*)'the metvarname ',trim(vartem),' will be dealt separately'
@@ -909,7 +909,7 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
       do i=1,size(name_metvars2d)
         vartem=trim(name_metvars2d(i))
         if(.not.( (trim(vartem)=='ps'.and.fv3sar_bg_opt==0).or.(trim(vartem)=="z") &
-                  .or.(trim(vartem)=="th2m").or.(trim(vartem)=="q2m")))  then !z is treated separately
+                  .or.(trim(vartem)=="t2m").or.(trim(vartem)=="q2m")))  then !z is treated separately
           if (ifindstrloc(vardynvars,trim(vartem)) > 0) then
             jdynvar=jdynvar+1
             fv3lam_io_dynmetvars2d_nouv(jdynvar)=trim(vartem)
@@ -1033,8 +1033,8 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
       if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
          call GSI_BundleGetPointer (GSI_MetGuess_Bundle(it),'q2m',ges_q2m,istatus ); ier=ier+istatus
          if (ier/=0) call die(trim(myname),'cannot get pointers for q2m, ier=',ier)
-         call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it),'th2m',ges_th2m, istatus );ier=ier+istatus
-         if (ier/=0) call die(trim(myname),'cannot get pointers for th2m,ier=',ier)
+         call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it),'t2m',ges_t2m, istatus );ier=ier+istatus
+         if (ier/=0) call die(trim(myname),'cannot get pointers for t2m,ier=',ier)
       endif
 
       if( fv3sar_bg_opt == 0) then 
@@ -1089,10 +1089,10 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
        
       endif
 
-      call gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_th2m,ges_q2m)
+      call gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_t2m,ges_q2m)
 
       if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
-! do not need to convert t2m to potentional T in ges_th2m
+! do not need to convert t2m to potentional T in ges_t2m
 ! Convert 2m guess mixing ratio to specific humidity
          ges_q2m = ges_q2m/(one+ges_q2m)
       endif
@@ -1113,7 +1113,7 @@ subroutine read_fv3_netcdf_guess(fv3filenamegin)
 
 end subroutine read_fv3_netcdf_guess
 
-subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_th2m,ges_q2m)
+subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_t2m,ges_q2m)
 !$$$  subprogram documentation block
 !                .      .    .                                       .
 ! subprogram:    gsi_fv3ncdf2d_read       
@@ -1149,7 +1149,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_th2m,ges_q2m)
 
     integer(i_kind),intent(in) :: it   
     real(r_kind),intent(in),dimension(:,:),pointer::ges_z
-    real(r_kind),intent(in),dimension(:,:),pointer::ges_th2m
+    real(r_kind),intent(in),dimension(:,:),pointer::ges_t2m
     real(r_kind),intent(in),dimension(:,:),pointer::ges_q2m
     type (type_fv3regfilenameg),intent(in) :: fv3filenamegin
     character(len=max_varname_length) :: name
@@ -1230,7 +1230,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_th2m,ges_q2m)
           else if( trim(name)=='SLMSK'.or.trim(name)=='slmsk' ) then
              k=k_slmsk
           else if( trim(name)=='T2M'.or.trim(name)=='t2m' ) then
-             k=k_th2m
+             k=k_t2m
           else if( trim(name)=='Q2M'.or.trim(name)=='q2m' ) then
              k=k_q2m
           else
@@ -1401,7 +1401,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_th2m,ges_q2m)
     ges_z(:,:)=sfcn2d(:,:,k_orog)/grav
     isli(:,:,it)=nint(sfcn2d(:,:,k_slmsk))
     if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
-       ges_th2m(:,:)=sfcn2d(:,:,k_th2m)
+       ges_t2m(:,:)=sfcn2d(:,:,k_t2m)
        ges_q2m(:,:)=sfcn2d(:,:,k_q2m)
     endif
     deallocate (sfcn2d,a)
@@ -2092,7 +2092,7 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     real(r_kind),pointer,dimension(:,:,:):: ges_u   =>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_v   =>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_q   =>NULL()
-    real(r_kind),pointer,dimension(:,:  ):: ges_th2m =>NULL()
+    real(r_kind),pointer,dimension(:,:  ):: ges_t2m =>NULL()
     real(r_kind),pointer,dimension(:,:  ):: ges_q2m  =>NULL()
    
     integer(i_kind) i,k
@@ -2131,7 +2131,7 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     end if
     if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
        call GSI_BundleGetPointer (GSI_MetGuess_Bundle(it),'q2m',ges_q2m,istatus); ier=ier+istatus
-       call GSI_BundleGetPointer (GSI_MetGuess_Bundle(it),'th2m',ges_th2m,istatus );ier=ier+istatus
+       call GSI_BundleGetPointer (GSI_MetGuess_Bundle(it),'t2m',ges_t2m,istatus );ier=ier+istatus
     endif
 
     if(l_reg_update_hydro_delz) then
@@ -2191,7 +2191,7 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     if (ier/=0) call die('get ges','cannot get pointers for fv3 met-fields, ier =',ier)
 
     if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
-! do not need to convert t2m from potentional T  to T in ges_th2m
+! do not need to convert t2m from potentional T  to T in ges_t2m
 ! Convert 2m guess specific humidity to mixing ratio
       ges_q2m = ges_q2m/(one-ges_q2m)
     endif
@@ -2215,7 +2215,7 @@ subroutine wrfv3_netcdf(fv3filenamegin)
     endif
 
     if(i_use_2mq4b > 0 .and. i_use_2mt4b > 0 ) then
-      call gsi_fv3ncdf_write_sfc(fv3filenamegin,'t2m',ges_th2m,add_saved)
+      call gsi_fv3ncdf_write_sfc(fv3filenamegin,'t2m',ges_t2m,add_saved)
       call gsi_fv3ncdf_write_sfc(fv3filenamegin,'q2m',ges_q2m,add_saved)
     endif
 

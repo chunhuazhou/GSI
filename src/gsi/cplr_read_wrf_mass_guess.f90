@@ -170,7 +170,7 @@ contains
     integer(i_kind) n_actual_clouds
   
     real(r_kind), pointer :: ges_ps_it (:,:  )=>NULL()
-    real(r_kind), pointer :: ges_th2_it(:,:  )=>NULL()
+    real(r_kind), pointer :: ges_t2m_it(:,:  )=>NULL()
     real(r_kind), pointer :: ges_q2_it (:,:  )=>NULL()
     real(r_kind), pointer :: ges_tsk_it(:,:  )=>NULL()
     real(r_kind), pointer :: ges_soilt1_it(:,:)=>NULL()
@@ -291,8 +291,8 @@ contains
           if (ier/=0) call die(trim(myname),'cannot get pointers for met-fields, ier =',ier)
   
           if (l_gsd_soilTQ_nudge .or.i_use_2mt4b>0) then
-             call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'th2m', ges_th2_it,istatus );ier=ier+istatus 
-             if (ier/=0) call die(trim(myname),'cannot get pointers for th2m, ier=',ier)
+             call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 't2m', ges_t2m_it,istatus );ier=ier+istatus 
+             if (ier/=0) call die(trim(myname),'cannot get pointers for t2m, ier=',ier)
           endif
 
           if (l_gsd_soilTQ_nudge) then
@@ -1192,9 +1192,9 @@ contains
                    ges_soilt1_it(j,i)=real(all_loc(j,i,i_soilt1),r_kind)
                 endif
                 if(i_use_2mt4b > 0 ) then
-                   ges_th2_it(j,i)=real(all_loc(j,i,i_th2),r_kind)
+                   ges_t2m_it(j,i)=real(all_loc(j,i,i_th2),r_kind)
   ! convert from potential to sensible temperature
-                   ges_th2_it(j,i)=ges_th2_it(j,i)*(ges_ps_it(j,i)/r100)**rd_over_cp_mass
+                   ges_t2m_it(j,i)=ges_t2m_it(j,i)*(ges_ps_it(j,i)/r100)**rd_over_cp_mass
                 endif
                 if(i_use_2mq4b>0) then
                   ges_q2_it(j,i)=real(all_loc(j,i,i_q2),r_kind)
@@ -1453,7 +1453,7 @@ contains
     real(r_kind)   :: ges_rho, tsn
 
     real(r_kind), pointer :: ges_ps_it (:,:  )=>NULL()
-    real(r_kind), pointer :: ges_th2_it(:,:  )=>NULL()
+    real(r_kind), pointer :: ges_t2m_it(:,:  )=>NULL()
     real(r_kind), pointer :: ges_q2_it (:,:  )=>NULL()
     real(r_kind), pointer :: ges_tsk_it(:,:  )=>NULL()
     real(r_kind), pointer :: ges_soilt1_it(:,:)=>NULL()
@@ -1937,8 +1937,8 @@ contains
              if (ier/=0) call die(trim(myname),'cannot get pointers for q2m, ier =',ier)
           endif
           if (i_use_2mt4b > 0) then
-             call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'th2m',ges_th2_it, istatus );ier=ier+istatus
-             if (ier/=0) call die(trim(myname),'cannot get pointers for th2m,ier =',ier)
+             call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 't2m',ges_t2m_it, istatus );ier=ier+istatus
+             if (ier/=0) call die(trim(myname),'cannot get pointers for t2m,ier =',ier)
           endif
           if (l_gsd_soilTQ_nudge) then
              call GSI_BundleGetPointer ( GSI_MetGuess_Bundle(it), 'tskn',ges_tsk_it, istatus );ier=ier+istatus 
@@ -2255,9 +2255,9 @@ contains
                 sno(j,i,it)=real(all_loc(j,i,i_0+i_sno),r_kind)
                 sfc_rough(j,i,it)=rough_default
                 if(i_use_2mt4b > 0 ) then
-                   ges_th2_it(j,i)=real(all_loc(j,i,i_0+i_th2),r_kind)
+                   ges_t2m_it(j,i)=real(all_loc(j,i,i_0+i_th2),r_kind)
   ! convert from potential to sensible temperature
-                   ges_th2_it(j,i)=ges_th2_it(j,i)*(ges_ps_it(j,i)/r100)**rd_over_cp_mass
+                   ges_t2m_it(j,i)=ges_t2m_it(j,i)*(ges_ps_it(j,i)/r100)**rd_over_cp_mass
                 endif
   ! for GSD soil nudging
                 if(l_gsd_soilTQ_nudge) then
