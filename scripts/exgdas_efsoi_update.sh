@@ -59,6 +59,7 @@ ASUFFIX=${ASUFFIX:-$SUFFIX}
 SMOOTH_ENKF=${SMOOTH_ENKF:-"YES"}
 
 GBIASe=${GBIASe:-${APREFIX}abias_int.ensmean}
+ATMANL_GSI_ENSRES=$COMINatmos/${APREFIX}atmanl.ensres$ASUFFIX
 CNVSTAT=${CNVSTAT:-${APREFIX}cnvstat}
 OZNSTAT=${OZNSTAT:-${APREFIX}oznstat}
 RADSTAT=${RADSTAT:-${APREFIX}radstat}
@@ -364,6 +365,7 @@ cat > enkf.nml << EOFnml
    sattypes_rad(71)= 'iasi_metop-c',  dsis(71)= 'iasi_metop-c',
    sattypes_rad(72)= 'viirs-m_npp',   dsis(72)= 'viirs-m_npp',
    sattypes_rad(73)= 'viirs-m_j1',    dsis(73)= 'viirs-m_j1',
+   sattypes_rad(74)= 'avhrr_metop-c', dsis(74)= 'avhrr3_metop-c',
    $SATOBS_ENKF
 /
 &ozobs_enkf
@@ -396,8 +398,10 @@ export ERR=$rc
 export err=$ERR
 $ERRSCRIPT || exit 2
 
-# save for EFSOI task (still needed?)
+# save for EFSOI task 
 $NCP $COMOUT_ANL_ENS/$GBIASe $COMOUT_ANL_ENSFSOI
+# save for EFSOI localization advection
+$NCP $ATMANL_GSI_ENSRES $COMOUT_ANL_ENSFSOI
 
 # Cat runtime output files.
 cat stdout stderr > $COMOUT_ANL_ENSFSOI/$ENKFSTAT

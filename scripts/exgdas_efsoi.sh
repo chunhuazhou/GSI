@@ -44,7 +44,7 @@ APRUN_ENKF=${APRUN_ENKF:-${APRUN:-""}}
 NTHREADS_ENKF=${NTHREADS_ENKF:-${NTHREADS:-1}}
 
 # Executables
-EFSOIEXEC=${EFSOIEXEC:-$HOMEgfs/exec/efsoi.x}
+EFSOIEXEC=${EFSOIEXEC:-$HOMEgfs/exec/global_efsoi.x}
 
 # Cycling and forecast hour specific parameters
 CDATE=${CDATE:-"2001010100"}
@@ -54,6 +54,8 @@ GPREFIX=${GPREFIX:-""}
 GSUFFIX=${GSUFFIX:-$SUFFIX}
 APREFIX=${APREFIX:-""}
 ASUFFIX=${ASUFFIX:-$SUFFIX}
+VPREFIX=${VPREFIX:-""}
+VSUFFIX=${VSUFFIX:-$SUFFIX}
 
 SMOOTH_ENKF=${SMOOTH_ENKF:-"YES"}
 
@@ -65,11 +67,11 @@ RADSTAT=${RADSTAT:-${APREFIX}radstat} # AFE not needed?
 EFSOISTAT=${EFSOISTAT:-${APREFIX}efsoistat}
 
 #AFE for EFSOI
-#VERFANL=${VERFANL:-${APREFIX}atmanl.nemsio}
-VERFANL=${VERFANL:-${APREFIX}atmanl.ensres.nc}
+VERFANL=${VERFANL:-${VPREFIX}atmanl.ensres.nc}
+INITANL=${INITANL:-${APREFIX}atmanl.ensres.nc}
 FCSTLONG=${GPREFIX}atmf030.ensmean.nc
 FCSTSHORT=${APREFIX}atmf024.ensmean.nc
-FCST6HRS=${PPREFIX}atmf006.ensmean.nc
+#FCST6HRS=${PPREFIX}atmf006.ensmean.nc
 OSENSEIN=osense_${CDATE}_init.dat
 OSENSEOUT=osense_${CDATE}_final.dat
 
@@ -186,12 +188,21 @@ done
 $NLN $COMIN_GES_ENS/${GPREFIX}atmf006.ensmean${GSUFFIX} sfg_${CDATE}_fhr06_ensmean
 $NLN $COMIN_GES_ENS/${GPREFIX}atmf006.ensmean${GSUFFIX} sfg_${CDATE}_fhr03_ensmean
 
+# The following deals with different files with the same local name (assuming
+# a 24hr EFSOI forecast):
+# both are hybrid analyses from gdas - one from CDATE saved during the
+# corresponding GDAS cycle in the efsoigdas tree to be used in 
+# the localization advection in EFSOI, the other from VDATE to be used
+# for verification.
+
+# saved analysis to be used for localization advection
+#$NLN ${COMIN_ANL}/${VERFANL} ${APREFIX}atmanl.ensmean.nc
+$NLN $COMOUT_ANL_ENSFSOI/${INITANL} ${APREFIX}atmanl.ensmean.nc
+
 # verifying analysis
-$NLN ${COMIN_ANL}/${VERFANL} .
-# the above way is the proper one, but this bit of subterfuge
-# is necessary because ensmean is hard coded into GSI - needs
-# to changed
-$NLN ${COMIN_ANL}/${VERFANL} ${APREFIX}atmanl.ensmean.nc
+#$NLN ${COMIN_ANL}/${VERFANL} .
+$NLN $ATMGES_ENSMEAN .
+
 
 # forecasts
 $NLN $COMIN_GES_ENS/$FCSTLONG .
@@ -335,6 +346,10 @@ cat > enkf.nml << EOFnml
    sattypes_rad(68)= 'ahi_himawari8', dsis(68)= 'ahi_himawari8',
    sattypes_rad(69)= 'abi_g16',       dsis(69)= 'abi_g16',
    sattypes_rad(70)= 'abi_g17',       dsis(70)= 'abi_g17',
+   sattypes_rad(71)= 'iasi_metop-c',  dsis(71)= 'iasi_metop-c',
+   sattypes_rad(72)= 'viirs-m_npp',   dsis(72)= 'viirs-m_npp',
+   sattypes_rad(73)= 'viirs-m_j1',    dsis(73)= 'viirs-m_j1',
+   sattypes_rad(74)= 'avhrr_metop-c', dsis(74)= 'avhrr3_metop-c',
    $SATOBS_ENKF
 /
 &ozobs_enkf
