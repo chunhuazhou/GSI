@@ -1241,41 +1241,27 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_t2m,ges_q2m)
              write(*,*) "wrong dimension number ndim =",ndim
              call stop2(119)
           endif
-          if(allocated(dim_id    )) deallocate(dim_id    )
-          allocate(dim_id(ndim))
           if(fv3_io_layout_y > 1) then
              do nio=0,fv3_io_layout_y-1
-               iret=nf90_inquire_variable(gfile_loc_layout(nio),i,dimids=dim_id)
                if(allocated(sfc       )) deallocate(sfc       )
-               if(dim(dim_id(1)) == nx .and. dim(dim_id(2))==ny_layout_len(nio)) then
                   if(ndim >=3) then
-                     allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
+                     allocate(sfc(nx,ny_layout_len(nio),1))
                      iret=nf90_get_var(gfile_loc_layout(nio),i,sfc)
                   else if (ndim == 2) then
-                     allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),1))
+                     allocate(sfc(nx,ny_layout_len(nio),1))
                      iret=nf90_get_var(gfile_loc_layout(nio),i,sfc(:,:,1))
                   endif
-               else
-                  write(*,*) "Mismatch dimension in surfacei reading:",nx,ny_layout_len(nio),dim(dim_id(1)),dim(dim_id(2))
-                  call stop2(119)
-               endif
                sfc_fulldomain(:,ny_layout_b(nio):ny_layout_e(nio))=sfc(:,:,1)
              enddo
           else
-             iret=nf90_inquire_variable(gfile_loc,i,dimids=dim_id)
              if(allocated(sfc       )) deallocate(sfc       )
-             if(dim(dim_id(1)) == nx .and. dim(dim_id(2))==ny) then
                 if(ndim >=3) then  !the block of 10 lines is compied from GSL gsi.
-                   allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),dim(dim_id(3))))
+                   allocate(sfc(nx,ny,1))
                    iret=nf90_get_var(gfile_loc,i,sfc)
                 else if (ndim == 2) then
-                   allocate(sfc(dim(dim_id(1)),dim(dim_id(2)),1))
+                   allocate(sfc(nx,ny,1))
                    iret=nf90_get_var(gfile_loc,i,sfc(:,:,1))
                 endif
-             else
-                write(*,*) "Mismatch dimension in surfacei reading:",nx,ny,dim(dim_id(1)),dim(dim_id(2))
-                call stop2(119)
-             endif
              sfc_fulldomain(:,:)=sfc(:,:,1)
           endif
           call fv3_h_to_ll(sfc_fulldomain,a,nx,ny,nxa,nya,grid_reverse_flag)
@@ -1335,19 +1321,15 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_t2m,ges_q2m)
           iret=nf90_inquire_variable(gfile_loc,k,name,len)
           if(trim(name)=='PHIS'   .or. trim(name)=='phis'  ) then
              iret=nf90_inquire_variable(gfile_loc,k,ndims=ndim)
-             if(allocated(dim_id    )) deallocate(dim_id    )
-             allocate(dim_id(ndim))
              if(fv3_io_layout_y > 1) then
                 do nio=0,fv3_io_layout_y-1
-                  iret=nf90_inquire_variable(gfile_loc_layout(nio),k,dimids=dim_id)
                   if(allocated(sfc1       )) deallocate(sfc1       )
-                  allocate(sfc1(dim(dim_id(1)),dim(dim_id(2))) )
+                  allocate(sfc1(nx,ny_layout_len(nio)) )
                   iret=nf90_get_var(gfile_loc_layout(nio),k,sfc1)
                   sfc_fulldomain(:,ny_layout_b(nio):ny_layout_e(nio))=sfc1
                 enddo
              else
-                iret=nf90_inquire_variable(gfile_loc,k,dimids=dim_id)
-                allocate(sfc1(dim(dim_id(1)),dim(dim_id(2))) )
+                allocate(sfc1(nx,ny) )
                 iret=nf90_get_var(gfile_loc,k,sfc1)
                 sfc_fulldomain=sfc1
              endif
@@ -1378,7 +1360,7 @@ subroutine gsi_fv3ncdf2d_read(fv3filenamegin,it,ges_z,ges_t2m,ges_q2m)
           end do
        end do
 
-       deallocate (dim_id,sfc,sfc1,dim)
+       deallocate (sfc,sfc1,dim)
        deallocate (sfc_fulldomain)
     endif  ! mype
 
