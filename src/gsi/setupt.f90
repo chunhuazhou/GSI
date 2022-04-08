@@ -1586,7 +1586,6 @@ subroutine setupt(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
       cdiagbufp(iip)    = station_id         ! station id
 
       rdiagbufp(1,iip)  = ictype(ikx)        ! observation type
-!     rdiagbufp(2,iip)  = icsubtype(ikx)     ! observation subtype
       rdiagbufp(2,iip)  = -1                 ! observation subtype (-1 for pseudo obs sub-type)
             
       rdiagbufp(3,iip)  = data(ilate,i)      ! observation latitude (degrees)
@@ -1644,9 +1643,9 @@ subroutine setupt(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
 
     if (twodvar_regional .or. l_obsprvdiag) then
        idia = idia + 1
-       rdiagbufp(idia,iip) = -9999. ! data(idomsfc,i) ! dominate surface type
+       rdiagbufp(idia,iip) = -9999._r_single ! data(idomsfc,i) ! dominate surface type
        idia = idia + 1
-       rdiagbufp(idia,iip) = -9999. ! data(izz,i)     ! model terrain at observation location
+       rdiagbufp(idia,iip) = -9999._r_single ! data(izz,i)     ! model terrain at observation location
 !      r_prvstg            = data(iprvd,i)
        cprvstgp(iip)         = '88888888'    !c_prvstg        ! provider name
 !      r_sprvstg           = data(isprvd,i)
@@ -1765,7 +1764,6 @@ subroutine setupt(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
     call nc_diag_metadata("Station_ID",              station_id             )
     call nc_diag_metadata("Observation_Class",       obsclass               )
     call nc_diag_metadata("Observation_Type",        ictype(ikx)            )
-!   call nc_diag_metadata("Observation_Subtype",     icsubtype(ikx)         )
     call nc_diag_metadata("Observation_Subtype",     -1                     ) ! (-1 for pseudo obs sub-type)
     call nc_diag_metadata("Latitude",                sngl(data(ilate,i))    )
     call nc_diag_metadata("Longitude",               sngl(data(ilone,i))    )
@@ -1811,11 +1809,7 @@ subroutine setupt(obsLL,odiagLL,lunin,mype,bwork,awork,nele,nobs,is,conv_diagsav
     if (twodvar_regional .or. l_obsprvdiag) then
        call nc_diag_metadata("Dominant_Sfc_Type", data(idomsfc,i)              )
        call nc_diag_metadata("Model_Terrain",     data(izz,i)                  )
-!      r_prvstg            = data(iprvd,i)
-!      call nc_diag_metadata("Provider_Name",     c_prvstg                     )    
-       call nc_diag_metadata("Provider_Name",     "88888888"                    )    
-!      r_sprvstg           = data(isprvd,i)
-!      call nc_diag_metadata("Subprovider_Name",  c_sprvstg                    )
+       call nc_diag_metadata("Provider_Name",     "88888888"                   )
        call nc_diag_metadata("Subprovider_Name",  "88888888"                   )
     endif
 
